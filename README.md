@@ -21,6 +21,7 @@
 
 - **A built-in chat interface for Claude and Codex**, designed mobile-first. Chats stream as they're written. Tool calls show as compact cards that expand to diffs, command output and file previews. Approvals appear inline (Allow / Always allow / Deny), so you can keep agents in ask-first mode and answer from your phone. Every chat is an ordinary Claude Code or Codex session, so you can also resume it in a terminal or in the official apps.
 - **Projects**: a tree of everything in `/workspace` (project → repo / worktree / folder → chats), built from Claude's and Codex's own transcripts. File chats into projects, archive them, and start new ones anywhere.
+- **Keys and secrets** for the agents: SSH keys for cloning and pushing, and tokens and API keys they get as environment variables. Values are write-only in the UI.
 - **Claude Code Remote Control server.** Claude sessions run in the container. You drive them from [claude.ai/code](https://claude.ai/code), the Claude mobile app or the desktop app's Code tab. Nothing depends on your laptop being awake.
 - **Codex** in persistent tmux sessions, plus the Claude and Codex extensions in VS Code.
 - **VS Code in the browser** (code-server) for diffs, reviews, editing and image/media previews.
@@ -99,6 +100,16 @@ The dashboard opens on **Projects**: a tree of everything in `/workspace` (proje
 - give a project its own Remote Control server (optionally one git worktree per session) from its Edit dialog.
 
 Organising only changes roost's view. It's stored in `/config/roost/projects.json`, and Claude's and Codex's own files are never modified. It can't reorganise the chat lists inside claude.ai or the Claude apps.
+
+### Keys and secrets
+
+The **Secrets** tab gives the agents what they need to work with your repositories and services:
+
+- **SSH keys.** Generate a key (or import one; a passphrase is removed so agents can use it) and say which hosts it's for, e.g. `github.com`. Copy the public key into GitHub or GitLab (an account key, or a repository's deploy key), then press **Test**. roost keeps a managed block in `~/.ssh/config`, so `git clone git@github.com:…` just works for agents, terminals and SSH sessions.
+- **Secrets.** Named values such as `GH_TOKEN`, `HASS_TOKEN` or an API key, each with a description. They become environment variables in every chat, terminal, SSH session and Remote Control session. A token can also be used for **git over HTTPS** to a host. `GH_TOKEN` also signs in the GitHub CLI.
+- Agents see what's available, names and descriptions only, in a managed section of `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, and by running `roost-secrets`.
+
+New chats, terminals and SSH sessions pick up changes immediately. Running chats, the Remote Control server and VS Code need a restart; the page has a button for Remote Control. Values are stored in roost's home directory (`/config/home/.config/roost/`, mode 600) and are never sent back to the browser. Agents can read anything they're able to use, though, so use narrowly scoped tokens. See [docs/sandboxing.md](docs/sandboxing.md).
 
 ### Multiple projects
 

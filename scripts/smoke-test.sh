@@ -53,6 +53,8 @@ check / 200 || fail=1
 check /api/status 200 || fail=1
 check /api/projects 200 || fail=1
 check /ui.js 200 || fail=1
+check /secrets.js 200 || fail=1
+check /api/secrets 200 || fail=1
 check /api/live/models 200 || fail=1
 check /code/ 302 || fail=1 # redirects to ./?folder=/workspace
 check "/code/?folder=/workspace" 200 || fail=1

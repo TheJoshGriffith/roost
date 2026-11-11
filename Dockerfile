@@ -85,7 +85,9 @@ RUN cd /opt/roost/dash && npm ci --omit=dev --no-audit --no-fund && npm cache cl
 
 COPY rootfs/ /
 RUN chmod 0755 /usr/local/bin/roost-* \
- && echo '. /etc/roost/root-switch.sh' >> /etc/bash.bashrc \
+ # Prepended, not appended: Debian's bash.bashrc returns early for non-interactive
+ # shells, and bash reads it for SSH commands, which need the secrets too.
+ && sed -i '1i . /etc/roost/shell-env.sh\n. /etc/roost/root-switch.sh' /etc/bash.bashrc \
  && echo "${ROOST_VERSION}" > /etc/roost/version
 
 ENV HOME=/config/home \

@@ -313,7 +313,7 @@ async function openChat(key) {
   if (chat.session) return { session: name };
   if (!chat.cwd || !fs.existsSync(chat.cwd)) throw httpError(409, `the folder this chat ran in no longer exists (${chat.cwd})`);
   if (chat.tool === 'claude') await run('/usr/local/bin/roost-trust', [chat.cwd]);
-  const cmd = chat.tool === 'claude' ? `claude --resume ${chat.id}` : `codex resume ${chat.id}`;
+  const cmd = chat.tool === 'claude' ? `roost-env claude --resume ${chat.id}` : `roost-env codex resume ${chat.id}`;
   const r = await run('tmux', ['new-session', '-d', '-s', name, '-c', chat.cwd, `${cmd}; exec bash -l`]);
   if (r.code !== 0) throw httpError(500, r.err.trim() || 'could not start tmux session');
   return { session: name };
@@ -327,7 +327,7 @@ async function newChat(projectId, tool, dir) {
   const cwd = dir ? await workspacePath(dir) : p.paths[0];
   if (tool === 'claude') await run('/usr/local/bin/roost-trust', [cwd]);
   const name = `${tool === 'claude' ? 'cl' : 'cx'}-new-${crypto.randomBytes(3).toString('hex')}`;
-  const r = await run('tmux', ['new-session', '-d', '-s', name, '-c', cwd, `${tool}; exec bash -l`]);
+  const r = await run('tmux', ['new-session', '-d', '-s', name, '-c', cwd, `roost-env ${tool}; exec bash -l`]);
   if (r.code !== 0) throw httpError(500, r.err.trim() || 'could not start tmux session');
   return { session: name };
 }

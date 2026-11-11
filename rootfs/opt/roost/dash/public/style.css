@@ -852,3 +852,41 @@ body[data-chat-open="true"] .toast { bottom: calc(120px + var(--safe-b)); }
 /* ---------------------------------------------------------------- roost additions */
 .conn.is-stale .dot { background: var(--bad); }
 .conn.is-stale { color: var(--bad-ink); }
+
+/* ---------------------------------------------------------------- Secrets page */
+.form { display: grid; gap: 18px; }
+.sx-intro p { margin: 0; }
+.sx-intro p + p { margin-top: 8px; }
+.sx-intro .small-print { display: flex; gap: 6px; align-items: flex-start; }
+.sx-list { list-style: none; margin: 0; padding: 0; }
+.sx-row { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-top: 1px solid var(--line); }
+.sx-row:first-child { border-top: 0; }
+.sx-main { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.sx-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; }
+.sx-title .mono { font-size: 14px; word-break: break-all; }
+.sx-desc { color: var(--text-2); font-size: 13.5px; }
+.sx-meta { color: var(--muted); font-size: 12.5px; word-break: break-all; }
+.sx-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.sx-chips .badge { display: inline-flex; align-items: center; gap: 4px; }
+.sx-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.sx-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--line); }
+.sx-empty p { margin: 0; }
+.sx-empty p + p { margin-top: 6px; }
+.sx-value { display: flex; gap: 8px; align-items: center; }
+.sx-value .input { flex: 1; min-width: 0; }
+.sx-git { display: grid; gap: 14px; grid-template-columns: 1fr; }
+.sx-pem { font-size: 12.5px; min-height: 130px; resize: vertical; }
+.sx-pub { margin: 0; padding: 12px; border-radius: 10px; background: var(--code-bg); font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.sx-caution { display: flex; gap: 8px; align-items: flex-start; margin: -8px 0 0; color: var(--warn-ink); font-size: 13px; }
+.sx-result { display: flex; gap: 8px; align-items: center; margin: 0; font-weight: 550; }
+.sx-result.ok { color: var(--ok-ink); }
+.sx-result.bad { color: var(--bad-ink); }
+.sx-apply p { margin: 0; color: var(--text-2); font-size: 13.5px; }
+.sx-apply.is-changed { border-color: var(--accent); }
+@media (max-width: 639px) {
+  .sx-row { flex-direction: column; }
+  .sx-actions { justify-content: flex-start; }
+}
+@media (min-width: 640px) {
+  .sx-git { grid-template-columns: 2fr 1fr; }
+}

@@ -19,6 +19,7 @@ roost assumes the agents inside it might do something dumb: delete files, instal
 
 - **Your workspace.** Agents can read, change and delete anything under `/workspace`. Keep it under git, and keep backups of anything you care about. Don't map shares the agents don't need.
 - **Your network.** The container can reach anything the host's LAN can reach, including other services on Harris by IP and your router's admin page. It also can't tell a legitimate request from a prompt-injected one. If that matters, put roost on its own VLAN or Docker network and restrict its traffic with firewall rules. Network policy isn't built in yet.
+- **Secrets you give the agents.** Anything on the Secrets page (SSH keys, tokens, API keys) is usable by the agents, and therefore readable by them: a prompt-injected agent could send them somewhere. roost keeps values out of the UI and out of the agents' instruction files, but that only prevents accidents, not a determined agent. Give each token the least access that works (fine-grained GitHub tokens for specific repositories, deploy keys rather than your account key, read-only Home Assistant users) and revoke anything you suspect.
 - **Credentials inside roost.** The Claude, Codex and GitHub sign-ins in `/config/home` can be read by the agents, and by anyone who gets into the web UI, because the UI includes a shell. Treat the roost web password like an SSH key:
   - keep it set (the default generates one),
   - don't expose port 7680 or 2222 to the internet; use a VPN (WireGuard/Tailscale) to reach it remotely,
@@ -37,5 +38,5 @@ roost assumes the agents inside it might do something dumb: delete files, instal
 ## Reset ladder
 
 1. **Recreate the container.** This resets the OS, packages and anything installed with sudo.
-2. **Delete `appdata/roost/home`.** This resets dotfiles, `~/.local` tools, sign-ins and the browser profile.
+2. **Delete `appdata/roost/home`.** This resets dotfiles, `~/.local` tools, sign-ins, the browser profile, and every key and secret on the Secrets page.
 3. **Delete `appdata/roost`.** This resets everything, including SSH host keys and the generated password.

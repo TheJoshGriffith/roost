@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# roost-env <cmd...>: run a command with roost's secrets loaded into its environment
+# (from ~/.config/roost/secrets.env, managed in the dashboard's Secrets page).
+f="${HOME:-/config/home}/.config/roost/secrets.env"
+if [ -r "$f" ]; then
+  # shellcheck disable=SC1090
+  . "$f"
+fi
+exec "$@"

@@ -450,11 +450,13 @@ function onRoute() {
     if (key && /^(claude|codex):[A-Za-z0-9-]+$/.test(key) && (findChat(key) || App.chats.has(key))) route = 'chat';
     else key = null;
   } else if (hash.startsWith('#/overview')) route = 'overview';
+  else if (hash.startsWith('#/secrets')) route = 'secrets';
 
   App.route = route;
   document.body.dataset.route = route;
-  $('#view-projects').hidden = route === 'overview';
+  $('#view-projects').hidden = route === 'overview' || route === 'secrets';
   $('#view-overview').hidden = route !== 'overview';
+  $('#view-secrets').hidden = route !== 'secrets';
   for (const a of $$('[data-nav]')) {
     const on = a.dataset.nav === route || (a.closest('.tabs') && a.dataset.nav === 'projects' && route === 'chat');
     a.removeAttribute('aria-current');
@@ -469,6 +471,7 @@ function onRoute() {
     if (route === 'projects' && mqDesk.matches && App.view.current) { App.view.current = null; chatView.show(null); }
   }
   if (route === 'overview') renderOv();
+  if (route === 'secrets') { Secrets.render(); Secrets.refresh(); }
   renderTree();
 }
 
@@ -495,6 +498,7 @@ function initShell() {
   nav[0].append(icon('folder', 22), 'Projects');
   nav[1].append(icon('message', 22), 'Chat', h('span', { class: 'nav-badge', 'data-needs-badge': '', hidden: true }));
   nav[2].append(icon('grid', 22), 'Overview');
+  nav[3].append(icon('key', 22), 'Secrets');
 
   $('#filter').addEventListener('input', (e) => { App.view.filter = e.target.value.trim().toLowerCase(); renderTree(); });
   $('#archived-btn').addEventListener('click', (e) => { App.view.showArchived = !App.view.showArchived; e.currentTarget.setAttribute('aria-pressed', String(App.view.showArchived)); renderTree(); });

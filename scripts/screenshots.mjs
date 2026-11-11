@@ -37,6 +37,10 @@ for (const s of shots) {
     await page.locator('#chat-pane .tc-head', { hasText: text }).first().click().catch(() => {});
     await page.waitForTimeout(300);
   }
+  for (const sel of s.click || []) { // click through to a state, e.g. open a sheet
+    await page.locator(sel).first().click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
   if (s.scroll === 'top') await page.evaluate(() => { const el = document.querySelector('#chat-pane .stream'); if (el) el.scrollTop = 0; });
   await page.screenshot({ path: `${out}/${s.name}.png` });
   console.log(`${s.name}: ok${errors.length ? ` (page errors: ${errors.join('; ')})` : ''}`);

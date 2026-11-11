@@ -25,6 +25,10 @@ const crypto = require('crypto');
 const readline = require('readline');
 const { spawn } = require('child_process');
 const chats = require('./chats');
+const secrets = require('./secrets');
+
+// Secrets are read at the start of each agent process, so edits apply to new chats.
+const agentEnv = () => ({ ...process.env, ...secrets.env() });
 
 const CLAUDE_BIN = process.env.ROOST_CLAUDE_BIN || '/usr/local/bin/claude';
 const CODEX_BIN = process.env.ROOST_CODEX_BIN || 'codex';
@@ -152,6 +156,7 @@ class ClaudeSession extends LiveSession {
         permissionMode: this.mode,
         includePartialMessages: true,
         pathToClaudeCodeExecutable: CLAUDE_BIN,
+        env: agentEnv(),
         // Behave like the CLI: Claude Code's own system prompt, plus user/project settings,
         // CLAUDE.md files and MCP servers (e.g. roost's shared browser).
         systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -339,7 +344,7 @@ class CodexSession extends LiveSession {
     this.rpcId = 0;
     this.calls = new Map();
     this.turnId = null;
-    const proc = spawn(CODEX_BIN, ['app-server'], { cwd: this.cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(CODEX_BIN, ['app-server'], { cwd: this.cwd, env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc = proc;
     this.ended = false;
     const stderr = [];

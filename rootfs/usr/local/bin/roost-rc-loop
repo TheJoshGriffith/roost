@@ -34,7 +34,8 @@ while true; do
   [ -n "${ROOST_CLAUDE_RC_ARGS:-}" ] && read -r -a extra <<< "$ROOST_CLAUDE_RC_ARGS" && args+=("${extra[@]}")
 
   echo "[$(date '+%F %T')] claude ${args[*]}"
-  claude "${args[@]}"
+  # Secrets are loaded fresh each start; restart Remote Control to pick up changes.
+  /usr/local/bin/roost-env claude "${args[@]}"
   rc=$?
   echo
   echo "[$(date '+%F %T')] claude remote-control exited ($rc). Restarting in 5s; press Ctrl-C for a shell."

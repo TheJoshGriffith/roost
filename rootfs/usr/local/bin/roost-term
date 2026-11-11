@@ -18,7 +18,7 @@ if tmux has-session -t "=$name" 2> /dev/null; then
 fi
 
 case "$name" in
-  codex) exec tmux new-session -s codex "codex; exec bash -l" ;;
-  claude) exec tmux new-session -s claude "claude; exec bash -l" ;;
+  codex) exec tmux new-session -s codex "roost-env codex; exec bash -l" ;;
+  claude) exec tmux new-session -s claude "roost-env claude; exec bash -l" ;;
   *) exec tmux new-session -s "$name" ;;
 esac

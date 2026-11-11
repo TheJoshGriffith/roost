@@ -8,6 +8,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const projects = require('./projects');
 const live = require('./live');
+const secrets = require('./secrets');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
@@ -141,7 +142,7 @@ function send(res, status, body, type = 'application/json') {
   res.end(data);
 }
 
-const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
+const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/secrets.js': 'secrets.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
 // Changes on every dashboard restart (i.e. every image update), so browsers never run stale assets.
 const ASSET_VERSION = Date.now().toString(36);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
@@ -169,6 +170,7 @@ const server = http.createServer(async (req, res) => {
     let m;
     if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
     if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
+    if (req.method === 'GET' && p === '/api/secrets') return send(res, 200, await secrets.list());
     if (req.method === 'GET' && p === '/api/live/models') return send(res, 200, await live.models());
     if (req.method === 'GET' && p === '/api/live/stream') {
       const key = url.searchParams.get('key') || '';
@@ -189,7 +191,7 @@ const server = http.createServer(async (req, res) => {
       if (!LOGS.has(m[1])) return send(res, 404, { error: 'unknown log' });
       return send(res, 200, tail(path.join(LOG_DIR, `${m[1]}.log`)), 'text/plain; charset=utf-8');
     }
-    if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') {
+    if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'PUT' || req.method === 'DELETE') {
       // A custom header can't be sent cross-origin without a CORS preflight we never
       // answer, so this blocks other sites from driving these endpoints via the browser.
       if (req.headers['x-roost'] !== '1') return send(res, 403, { error: 'missing X-Roost header' });
@@ -204,6 +206,23 @@ const server = http.createServer(async (req, res) => {
         const b = await readJsonBody(req);
         if (m[2] === 'new-chat') return send(res, 200, await projects.newChat(id, b.tool, b.dir));
         return send(res, 200, await projects.setRemoteControl(id, !!b.enabled, b.mode));
+      }
+      // Keys & secrets. Values are accepted but never returned.
+      if ((m = p.match(/^\/api\/secrets\/env\/([^/]+)$/))) {
+        const name = decodeURIComponent(m[1]);
+        if (req.method === 'PUT') return send(res, 200, secrets.setEnv(name, await readJsonBody(req)));
+        if (req.method === 'DELETE') { secrets.deleteEnv(name); return send(res, 200, { ok: true }); }
+      }
+      if (req.method === 'POST' && p === '/api/secrets/keys') {
+        const b = await readJsonBody(req);
+        const key = b.privateKey ? await secrets.importKey(String(b.name || ''), b) : await secrets.generateKey(String(b.name || ''), b);
+        return send(res, 201, key);
+      }
+      if ((m = p.match(/^\/api\/secrets\/keys\/([^/]+)(\/test)?$/))) {
+        const name = decodeURIComponent(m[1]);
+        if (m[2] && req.method === 'POST') return send(res, 200, await secrets.testKey(name, (await readJsonBody(req)).host));
+        if (!m[2] && req.method === 'PATCH') return send(res, 200, await secrets.updateKey(name, await readJsonBody(req)));
+        if (!m[2] && req.method === 'DELETE') { secrets.deleteKey(name); return send(res, 200, { ok: true }); }
       }
       if (req.method === 'POST' && p.startsWith('/api/live/')) {
         const b = await readJsonBody(req);
@@ -272,3 +291,4 @@ const server = http.createServer(async (req, res) => {
 // Only Caddy (with the login) should reach the dashboard; DASH_HOST exists for debugging.
 const HOST = process.env.DASH_HOST || '127.0.0.1';
 server.listen(PORT, HOST, () => console.log(`roost dashboard on ${HOST}:${PORT}`));
+try { secrets.regenerateIfPresent(); } catch (e) { console.error('secrets: could not regenerate:', e.message); }
