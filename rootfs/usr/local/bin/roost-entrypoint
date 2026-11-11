@@ -68,7 +68,8 @@ else
 fi
 
 # ------------------------------------------------------------------ secrets
-randpw() { tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1" || true; }
+# No look-alike characters (0/O, 1/l/I), so the password can be read and typed by hand.
+randpw() { tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom | head -c "$1" || true; }
 
 WEB_AUTH=true
 if [ "${ROOST_PASSWORD:-}" = "none" ]; then
@@ -79,7 +80,7 @@ elif [ -n "${ROOST_PASSWORD:-}" ]; then
 else
   if [ ! -s "$SECRETS/web-password" ]; then
     randpw 24 > "$SECRETS/web-password"
-    log "generated a web UI password: user '$ROOST_USER', password '$(cat "$SECRETS/web-password")'"
+    log "generated a web UI password. Username: '$ROOST_USER' (all lowercase), password: '$(cat "$SECRETS/web-password")'"
     log "(stored in $SECRETS/web-password; set ROOST_PASSWORD to choose your own)"
   fi
   WEB_PASSWORD="$(cat "$SECRETS/web-password")"
