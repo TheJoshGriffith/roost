@@ -74,6 +74,12 @@ if [ "$got" = 403 ]; then echo "ok   CSRF guard"; else echo "FAIL CSRF guard -> 
 
 docker exec -u roost "$name" bash -lc 'claude --version && codex --version && playwright-mcp --version && gh --version | head -1 && uv --version' || fail=1
 docker exec "$name" bash -c 'test "$(stat -c %U /config/home)" = roost' && echo "ok   home owned by roost" || fail=1
+# The seeded Codex config must load (Codex refuses to start on an invalid setting).
+if docker exec -u roost "$name" bash -lc 'codex login status 2>&1' | grep -q 'Error loading configuration'; then
+  echo "FAIL codex config does not load"; fail=1
+else
+  echo "ok   codex config loads"
+fi
 docker exec "$name" bash -c '! pgrep -u root -x claude' > /dev/null && echo "ok   no agent processes as root" || fail=1
 
 exit "$fail"

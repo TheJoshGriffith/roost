@@ -1,10 +1,11 @@
 # Codex config (seeded by roost; edit freely, it won't be overwritten).
 
 # Codex's sandbox needs user namespaces, which an unprivileged container doesn't
-# have, so commands run unsandboxed (the container is the sandbox) and Codex asks
-# before running anything it doesn't know to be safe.
+# have, so commands run unsandboxed (the container is the sandbox). With
+# on-request, Codex asks when it judges a command needs approval. (roost's chat
+# interface also offers a stricter "Ask" mode that asks before every command.)
 sandbox_mode = "danger-full-access"
-approval_policy = "untrusted"
+approval_policy = "on-request"
 
 # The shared, VNC-viewable Chromium (see ~/.codex/AGENTS.md).
 [mcp_servers.browser]

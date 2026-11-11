@@ -26,12 +26,23 @@ if once codex-sandbox; then
   touch "$cfg"
   add=""
   grep -qE '^[[:space:]]*sandbox_mode[[:space:]]*=' "$cfg" || add+=$'sandbox_mode = "danger-full-access"\n'
-  grep -qE '^[[:space:]]*approval_policy[[:space:]]*=' "$cfg" || add+=$'approval_policy = "untrusted"\n'
+  grep -qE '^[[:space:]]*approval_policy[[:space:]]*=' "$cfg" || add+=$'approval_policy = "on-request"\n'
   if [ -n "$add" ]; then
     { printf '# Added by roost: Codex sandboxing is unavailable in containers; approvals stay on.\n%s\n' "$add"; cat "$cfg"; } > "$cfg.roost-tmp" && mv "$cfg.roost-tmp" "$cfg"
     log "configured Codex to run unsandboxed with approvals (container is the sandbox)"
   fi
   done_ codex-sandbox
+fi
+
+# Codex's config file no longer accepts approval_policy = "untrusted" (an early
+# roost build wrote it, which stops Codex from starting). Switch it to on-request.
+if once codex-approval-fix; then
+  cfg="$HOME/.codex/config.toml"
+  if [ -f "$cfg" ] && grep -qE '^[[:space:]]*approval_policy[[:space:]]*=[[:space:]]*"untrusted"' "$cfg"; then
+    sed -i -E 's/^([[:space:]]*approval_policy[[:space:]]*=[[:space:]]*)"untrusted"/\1"on-request"/' "$cfg"
+    log "fixed Codex config: approval_policy untrusted -> on-request"
+  fi
+  done_ codex-approval-fix
 fi
 
 # Install the Claude Code and Codex extensions into code-server, in the background
