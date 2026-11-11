@@ -1,0 +1,183 @@
+'use strict';
+// roost dashboard: a tiny zero-dependency status/control API plus a static page.
+// Listens on localhost only; Caddy puts it (and the login) on the public port.
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { execFile } = require('child_process');
+
+const PORT = Number(process.env.DASH_PORT || 7682);
+const HOME = process.env.HOME || '/config/home';
+const STATE = '/config/roost';
+const LOG_DIR = path.join(STATE, 'logs');
+const RC_CONF = path.join(STATE, 'rc-projects.conf');
+const PUBLIC = path.join(__dirname, 'public');
+const SUPERVISOR = ['-c', '/etc/roost/supervisord.conf'];
+const SERVICES = new Set([
+  'caddy', 'dash', 'ttyd', 'code-server', 'filebrowser', 'xvfb', 'openbox',
+  'chromium', 'x11vnc', 'novnc', 'claude-rc', 'sshd',
+]);
+const LOGS = new Set([...SERVICES, 'code-server-extensions', 'update']);
+
+function run(cmd, args, timeout = 8000) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout, maxBuffer: 2 << 20 }, (err, stdout, stderr) => {
+      resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(stdout), err: String(stderr) });
+    });
+  });
+}
+
+const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+const nonEmpty = (file) => { try { return fs.statSync(file).size > 0; } catch { return false; } };
+const readText = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
+
+// Version strings are stable for the life of the container; resolve them once.
+const versions = { roost: readText('/etc/roost/version').trim() || 'dev' };
+(async () => {
+  const first = (r) => (r.out || r.err).trim().split('\n')[0] || null;
+  versions.claude = first(await run('claude', ['--version'], 20000));
+  versions.codex = first(await run('codex', ['--version'], 20000));
+  versions.codeServer = first(await run('code-server', ['--version'], 20000));
+})();
+
+async function services() {
+  const r = await run('supervisorctl', [...SUPERVISOR, 'status']);
+  return r.out.split('\n').map((line) => {
+    const m = line.match(/^(\S+)\s+(\S+)\s*(.*)$/);
+    return m && { name: m[1], state: m[2], detail: m[3].trim() };
+  }).filter(Boolean);
+}
+
+function rcSessionName(p) {
+  return 'rc-' + p.replace(/^\//, '').replace(/\//g, '_').replace(/[^A-Za-z0-9_-]/g, '');
+}
+
+function rcProjects() {
+  return readText(RC_CONF).split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+    .map((l) => {
+      const [dir, mode = 'same-dir', ...name] = l.split(/\s+/);
+      return { dir, mode, name: name.join(' ') || null, session: rcSessionName(dir) };
+    });
+}
+
+async function rcStatus() {
+  const projects = rcProjects();
+  const live = new Set((await run('tmux', ['list-sessions', '-F', '#{session_name}'])).out.split('\n').filter(Boolean));
+  for (const p of projects) {
+    p.running = live.has(p.session);
+    if (p.running) {
+      const cap = await run('tmux', ['capture-pane', '-p', '-J', '-t', `=${p.session}:`, '-S', '-60']);
+      p.console = cap.out.replace(/\s+$/, '').split('\n').slice(-40).join('\n');
+    }
+  }
+  return { projects, sessions: [...live].sort() };
+}
+
+async function browserStatus() {
+  try {
+    const res = await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(1500) });
+    const j = await res.json();
+    return { up: true, version: j.Browser || null };
+  } catch {
+    return { up: false };
+  }
+}
+
+function accounts() {
+  const claudeCfg = readJson(path.join(HOME, '.claude.json')) || {};
+  const ghHosts = readText(path.join(HOME, '.config/gh/hosts.yml'));
+  const ghUser = (ghHosts.match(/^\s+user:\s*(\S+)/m) || [])[1] || null;
+  const keys = (readText(path.join(HOME, '.ssh/authorized_keys')) + '\n' + readText(path.join(STATE, 'ssh/authorized_keys')))
+    .split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
+  return {
+    claude: {
+      signedIn: nonEmpty(path.join(HOME, '.claude/.credentials.json')) || !!process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      account: (claudeCfg.oauthAccount && claudeCfg.oauthAccount.emailAddress) || null,
+      browserMcp: !!(claudeCfg.mcpServers && claudeCfg.mcpServers.browser),
+    },
+    codex: { signedIn: nonEmpty(path.join(HOME, '.codex/auth.json')) },
+    github: { signedIn: !!ghUser, user: ghUser },
+    ssh: { enabled: process.env.ROOST_SSH === 'true', port: Number(process.env.ROOST_SSH_PORT || 2222), authorizedKeys: keys },
+  };
+}
+
+function tail(file, bytes = 64 * 1024) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const { size } = fs.fstatSync(fd);
+    const start = Math.max(0, size - bytes);
+    const buf = Buffer.alloc(size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+    return buf.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function send(res, status, body, type = 'application/json') {
+  const data = type === 'application/json' ? JSON.stringify(body) : body;
+  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.end(data);
+}
+
+const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://x');
+  const p = url.pathname;
+  try {
+    if (req.method === 'GET' && STATIC[p]) {
+      const f = path.join(PUBLIC, STATIC[p]);
+      return send(res, 200, fs.readFileSync(f), TYPES[path.extname(f)]);
+    }
+    if (req.method === 'GET' && p === '/api/health') return send(res, 200, { ok: true });
+    if (req.method === 'GET' && p === '/api/status') {
+      const [svc, rc, browser] = await Promise.all([services(), rcStatus(), browserStatus()]);
+      return send(res, 200, {
+        name: process.env.ROOST_NAME || 'roost',
+        versions, services: svc, rc, browser, accounts: accounts(),
+        vnc: { mode: process.env.ROOST_VNC_MODE || 'localhost' },
+        sudo: process.env.ROOST_SUDO === 'true',
+      });
+    }
+    let m;
+    if (req.method === 'GET' && (m = p.match(/^\/api\/logs\/([\w-]+)$/))) {
+      if (!LOGS.has(m[1])) return send(res, 404, { error: 'unknown log' });
+      return send(res, 200, tail(path.join(LOG_DIR, `${m[1]}.log`)), 'text/plain; charset=utf-8');
+    }
+    if (req.method === 'POST') {
+      // A custom header can't be sent cross-origin without a CORS preflight we never
+      // answer, so this blocks other sites from driving these endpoints via the browser.
+      if (req.headers['x-roost'] !== '1') return send(res, 403, { error: 'missing X-Roost header' });
+      if ((m = p.match(/^\/api\/services\/([\w-]+)\/restart$/))) {
+        if (!SERVICES.has(m[1])) return send(res, 404, { error: 'unknown service' });
+        const r = await run('supervisorctl', [...SUPERVISOR, 'restart', m[1]], 30000);
+        return send(res, r.code === 0 ? 200 : 500, { output: (r.out + r.err).trim() });
+      }
+      if ((m = p.match(/^\/api\/rc\/([\w-]+)\/restart$/))) {
+        if (!rcProjects().some((x) => x.session === m[1])) return send(res, 404, { error: 'unknown project' });
+        await run('tmux', ['kill-session', '-t', `=${m[1]}`]);
+        return send(res, 200, { output: 'killed; the watchdog restarts it within ~15s' });
+      }
+      if ((m = p.match(/^\/api\/rc\/([\w-]+)\/keys$/))) {
+        // Send a short answer (e.g. "y") to a Remote Control console prompt.
+        const body = await new Promise((r) => { let d = ''; req.on('data', (c) => { d += c; if (d.length > 64) req.destroy(); }); req.on('end', () => r(d)); });
+        const keys = String(body).slice(0, 32);
+        if (!rcProjects().some((x) => x.session === m[1])) return send(res, 404, { error: 'unknown project' });
+        await run('tmux', ['send-keys', '-t', `=${m[1]}:`, '-l', keys]);
+        await run('tmux', ['send-keys', '-t', `=${m[1]}:`, 'Enter']);
+        return send(res, 200, { output: 'sent' });
+      }
+    }
+    return send(res, 404, { error: 'not found' });
+  } catch (e) {
+    return send(res, 500, { error: String(e && e.message || e) });
+  }
+});
+
+server.listen(PORT, '127.0.0.1', () => console.log(`roost dashboard on 127.0.0.1:${PORT}`));

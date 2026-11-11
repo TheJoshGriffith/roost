@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# roost-with-x <cmd...>: wait for the virtual display, then exec the command.
+set -euo pipefail
+sock="/tmp/.X11-unix/X${DISPLAY#:}"
+for _ in $(seq 1 60); do
+  [ -S "$sock" ] && exec "$@"
+  sleep 0.5
+done
+echo "display $DISPLAY did not come up" >&2
+exit 1

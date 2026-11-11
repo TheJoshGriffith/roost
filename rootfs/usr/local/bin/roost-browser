@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# roost-browser: the shared Chromium. You see it over VNC (/vnc/); agents drive
+# it through the Chrome DevTools Protocol on 127.0.0.1:9222 (Playwright MCP).
+# Its profile persists in the home dir, so logins and cookies survive restarts.
+set -euo pipefail
+
+profile="$HOME/.config/roost-chromium"
+mkdir -p "$profile"
+# A container restart leaves stale lock files that make Chromium refuse to start.
+rm -f "$profile"/Singleton*
+
+screen="${ROOST_SCREEN:-1600x900x24}"
+width="${screen%%x*}"
+rest="${screen#*x}"
+height="${rest%%x*}"
+
+# --no-sandbox: Chromium's own sandbox needs user namespaces that Docker's
+# default seccomp profile blocks; the container is the sandbox here.
+# shellcheck disable=SC2086
+exec /usr/bin/chromium \
+  --no-sandbox \
+  --disable-dev-shm-usage \
+  --no-first-run \
+  --no-default-browser-check \
+  --password-store=basic \
+  --user-data-dir="$profile" \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --window-position=0,0 \
+  --window-size="$width,$height" \
+  --start-maximized \
+  ${ROOST_BROWSER_FLAGS:-} \
+  about:blank

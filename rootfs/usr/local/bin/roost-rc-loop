@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# roost-rc-loop <path> [spawn-mode] [name]: runs `claude remote-control` for one
+# project forever, restarting it if it exits (e.g. after a long network outage).
+set -uo pipefail
+
+path="$1"
+mode="${2:-same-dir}"
+name="${3:-}"
+[ -n "$name" ] || name="${ROOST_NAME:-roost} · $(basename "$path")"
+
+cd "$path" || { echo "cannot cd to $path"; sleep 60; exit 1; }
+
+logged_in() {
+  [ -s "$HOME/.claude/.credentials.json" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]
+}
+
+while true; do
+  if ! logged_in; then
+    clear
+    echo "roost: Claude Code isn't signed in yet."
+    echo
+    echo "  Open the web terminal and run:  roost-setup claude"
+    echo
+    echo "Checking again in 20s..."
+    sleep 20
+    continue
+  fi
+
+  # Pre-accept the workspace trust prompt for this directory.
+  /usr/local/bin/roost-trust "$path"
+
+  args=(remote-control --spawn "$mode" --name "$name")
+  [ -n "${ROOST_CLAUDE_PERMISSION_MODE:-}" ] && args+=(--permission-mode "$ROOST_CLAUDE_PERMISSION_MODE")
+  [ -n "${ROOST_CLAUDE_RC_ARGS:-}" ] && read -r -a extra <<< "$ROOST_CLAUDE_RC_ARGS" && args+=("${extra[@]}")
+
+  echo "[$(date '+%F %T')] claude ${args[*]}"
+  claude "${args[@]}"
+  rc=$?
+  echo
+  echo "[$(date '+%F %T')] claude remote-control exited ($rc). Restarting in 5s; press Ctrl-C for a shell."
+  interrupted=0
+  trap 'interrupted=1' INT
+  sleep 5 || true
+  trap - INT
+  if [ "$interrupted" = 1 ]; then
+    echo "Shell opened; type 'exit' to resume Remote Control."
+    bash -l
+  fi
+done

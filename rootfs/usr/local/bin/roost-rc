@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# roost-rc: watchdog that keeps one tmux session per configured project running
+# `claude remote-control`. tmux supplies the TTY that Remote Control needs, and
+# lets you attach to answer prompts (roost-term rc-<name>, or `tmux attach`).
+set -uo pipefail
+
+CONF=/config/roost/rc-projects.conf
+
+if [ ! -f "$CONF" ]; then
+  cat > "$CONF" <<'EOF'
+# roost: Claude Remote Control servers. One project per line:
+#
+#   <absolute path>  [spawn mode]  [display name]
+#
+# spawn mode: same-dir (default) - sessions share the directory
+#             worktree           - each session gets its own git worktree (path must be a git repo)
+#             session            - serve exactly one session
+# Display names may contain spaces. Changes are picked up within ~15s; remove a
+# line and kill its session (dashboard -> Restart) to stop serving it.
+
+/workspace  same-dir
+EOF
+fi
+
+session_name() { # /workspace/foo -> rc-workspace_foo
+  local p="${1#/}"
+  p="${p//\//_}"
+  echo "rc-${p//[^A-Za-z0-9_-]/}"
+}
+
+echo "[roost-rc] watching $CONF"
+while true; do
+  while read -r path mode name; do
+    [[ -z "${path:-}" || "$path" == \#* ]] && continue
+    sess="$(session_name "$path")"
+    tmux has-session -t "=$sess" 2> /dev/null && continue
+    if [ ! -d "$path" ]; then
+      echo "[roost-rc] skipping $path: not a directory"
+      continue
+    fi
+    echo "[roost-rc] starting $sess for $path (${mode:-same-dir})"
+    tmux new-session -d -s "$sess" -c "$path" \
+      /usr/local/bin/roost-rc-loop "$path" "${mode:-same-dir}" "${name:-}"
+  done < "$CONF"
+  sleep 15
+done

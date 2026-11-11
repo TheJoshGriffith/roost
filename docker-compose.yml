@@ -1,0 +1,22 @@
+# Example for plain Docker hosts. On Unraid, use unraid/roost.xml instead.
+services:
+  roost:
+    image: ghcr.io/thejoshgriffith/roost:latest
+    container_name: roost
+    hostname: roost
+    restart: unless-stopped
+    ports:
+      - "7680:7680" # web UI
+      - "2222:2222" # ssh (key only)
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/London
+      # ROOST_PASSWORD: change-me          # blank = generated, printed in `docker logs roost`
+      # ROOST_SSH_AUTHORIZED_KEYS: "ssh-ed25519 AAAA... you@laptop"
+    volumes:
+      - ./config:/config
+      - ./workspace:/workspace
+    shm_size: 1g
+    mem_limit: 8g
+    pids_limit: 4096

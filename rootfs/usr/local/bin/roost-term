@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# roost-term [session]: what the web terminal runs. Attaches to (or creates) a
+# persistent tmux session, so closing the browser tab never kills your work.
+#   /term/              -> session "main"
+#   /term/?arg=codex    -> session "codex", starts Codex if new
+#   /term/?arg=claude   -> session "claude", starts Claude Code if new
+#   /term/?arg=rc-...   -> a Claude Remote Control console
+set -uo pipefail
+
+name="${1:-main}"
+name="${name//[^A-Za-z0-9_-]/}"
+[ -n "$name" ] || name=main
+
+cd /workspace 2> /dev/null || cd "$HOME" || exit 1
+
+if tmux has-session -t "=$name" 2> /dev/null; then
+  exec tmux attach-session -t "=$name"
+fi
+
+case "$name" in
+  codex) exec tmux new-session -s codex "codex; exec bash -l" ;;
+  claude) exec tmux new-session -s claude "claude; exec bash -l" ;;
+  *) exec tmux new-session -s "$name" ;;
+esac

@@ -1,0 +1,6 @@
+# Codex config (seeded by roost; edit freely, it won't be overwritten).
+
+# The shared, VNC-viewable Chromium (see ~/.codex/AGENTS.md).
+[mcp_servers.browser]
+command = "playwright-mcp"
+args = ["--cdp-endpoint", "http://127.0.0.1:9222"]

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# roost-setup [claude|codex|gh|git|ssh|all]: guided first-run sign-in.
+set -uo pipefail
+
+bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+ask() { local a; read -r -p "$1 [y/N] " a; [[ "${a,,}" == y* ]]; }
+
+setup_claude() {
+  bold "Claude Code sign-in"
+  if [ -s "$HOME/.claude/.credentials.json" ]; then
+    echo "Already signed in. (Run 'claude auth logout' first to switch accounts.)"
+  else
+    echo "Opening the login flow. Open the URL it prints on any device, then paste the code back here."
+    claude auth login || claude /login
+  fi
+  local sess=rc-workspace
+  bold "Remote Control"
+  echo "The Remote Control server starts within ~20s of signing in, in tmux session '$sess'."
+  echo "The first time, it asks 'Enable Remote Control? (y/n)'; answer y there."
+  if ask "Switch to the Remote Control console now?"; then
+    sleep 2
+    if [ -n "${TMUX:-}" ]; then
+      tmux switch-client -t "=$sess" 2> /dev/null || echo "Session $sess isn't up yet; try again in a few seconds (Ctrl-b s lists sessions)."
+    else
+      tmux attach-session -t "=$sess" || true
+    fi
+  fi
+}
+
+setup_codex() {
+  bold "Codex sign-in"
+  if [ -s "$HOME/.codex/auth.json" ]; then
+    echo "Already signed in. (Run 'codex logout' first to switch accounts.)"
+    return
+  fi
+  echo "Using device-code login: open the URL it prints on any device and enter the code."
+  if ! codex login --device-auth; then
+    cat <<'EOF'
+
+Device-code login didn't work. Alternatives:
+  * Sign in with an API key:   printenv OPENAI_API_KEY | codex login --with-api-key
+  * Browser login over SSH:    ssh -L 1455:localhost:1455 -p 2222 roost@<server>
+                               then run `codex login` in that SSH session and open the URL locally.
+EOF
+  fi
+}
+
+setup_gh() {
+  bold "GitHub CLI"
+  if gh auth status > /dev/null 2>&1; then
+    gh auth status
+  else
+    gh auth login --git-protocol https --web && gh auth setup-git
+  fi
+}
+
+setup_git() {
+  bold "Git identity"
+  local n e
+  n="$(git config --global user.name || true)"
+  e="$(git config --global user.email || true)"
+  read -r -p "Name [${n}]: " in_n
+  read -r -p "Email [${e}]: " in_e
+  git config --global user.name "${in_n:-$n}"
+  git config --global user.email "${in_e:-$e}"
+  echo "Saved."
+}
+
+setup_ssh() {
+  bold "SSH access"
+  echo "Add public keys (one per line) to ~/.ssh/authorized_keys, or set ROOST_SSH_AUTHORIZED_KEYS."
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  read -r -p "Paste a public key to add (blank to skip): " key
+  if [ -n "$key" ]; then
+    echo "$key" >> "$HOME/.ssh/authorized_keys"
+    chmod 600 "$HOME/.ssh/authorized_keys"
+    echo "Added. Connect with: ssh -p ${ROOST_SSH_PORT:-2222} roost@<server>"
+  fi
+}
+
+case "${1:-all}" in
+  claude) setup_claude ;;
+  codex) setup_codex ;;
+  gh | github) setup_gh ;;
+  git) setup_git ;;
+  ssh) setup_ssh ;;
+  all)
+    setup_git
+    ask "Sign in to GitHub CLI?" && setup_gh
+    ask "Sign in to Codex?" && setup_codex
+    setup_claude
+    ;;
+  *)
+    echo "usage: roost-setup [claude|codex|gh|git|ssh|all]"
+    exit 2
+    ;;
+esac

@@ -1,0 +1,11 @@
+{
+  "workbench.colorTheme": "Default Dark Modern",
+  "telemetry.telemetryLevel": "off",
+  "security.workspace.trust.enabled": false,
+  "workbench.startupEditor": "none",
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "diffEditor.ignoreTrimWhitespace": false,
+  "files.watcherExclude": { "**/node_modules/**": true, "**/.git/objects/**": true }
+}

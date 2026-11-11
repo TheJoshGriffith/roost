@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# roost-entrypoint: runs as root once at container start, prepares the
+# environment, then hands over to supervisord. Everything agent-facing runs as
+# the unprivileged `roost` user.
+set -euo pipefail
+
+log() { echo "[roost] $*"; }
+
+bool() { # normalise yes/1/on/true -> true, anything else -> false
+  case "${1,,}" in 1 | y | yes | on | true) echo true ;; *) echo false ;; esac
+}
+
+STATE=/config/roost
+SECRETS="$STATE/secrets"
+export HOME=/config/home USER=roost LOGNAME=roost SHELL=/bin/bash
+export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# ------------------------------------------------------------------ settings
+: "${PUID:=1000}" "${PGID:=1000}" "${UMASK:=002}" "${TZ:=Etc/UTC}"
+: "${ROOST_PORT:=7680}" "${ROOST_SSH_PORT:=2222}" "${ROOST_SCREEN:=1600x900x24}"
+: "${ROOST_USER:=roost}" "${ROOST_NAME:=roost}"
+ROOST_SUDO="$(bool "${ROOST_SUDO:-true}")"; export ROOST_SUDO
+ROOST_SSH="$(bool "${ROOST_SSH:-true}")"; export ROOST_SSH
+ROOST_BROWSER="$(bool "${ROOST_BROWSER:-true}")"; export ROOST_BROWSER
+ROOST_CODE_SERVER="$(bool "${ROOST_CODE_SERVER:-true}")"; export ROOST_CODE_SERVER
+ROOST_FILES="$(bool "${ROOST_FILES:-true}")"; export ROOST_FILES
+ROOST_CLAUDE_RC="$(bool "${ROOST_CLAUDE_RC:-true}")"; export ROOST_CLAUDE_RC
+ROOST_UPDATE_ON_START="$(bool "${ROOST_UPDATE_ON_START:-false}")"; export ROOST_UPDATE_ON_START
+export PUID PGID UMASK TZ ROOST_PORT ROOST_SSH_PORT ROOST_SCREEN ROOST_USER ROOST_NAME
+
+umask "$UMASK"
+
+# ------------------------------------------------------------------ timezone
+if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+  ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+  echo "$TZ" > /etc/timezone
+fi
+
+# ------------------------------------------------------------------ user mapping
+[ "$(id -g roost)" = "$PGID" ] || groupmod -o -g "$PGID" roost
+[ "$(id -u roost)" = "$PUID" ] || usermod -o -u "$PUID" roost
+
+# ------------------------------------------------------------------ directories
+mkdir -p "$HOME" "$STATE/logs" "$STATE/ssh" "$STATE/state" "$SECRETS" /run/roost /run/sshd /workspace
+chown roost:roost /config "$HOME" "$STATE" "$STATE/logs" "$STATE/state" /run/roost
+chmod 0755 /config "$STATE" "$STATE/ssh"
+chmod 0700 "$SECRETS"
+# Re-own the home dir if PUID/PGID changed since it was created.
+if [ "$(stat -c %u:%g "$HOME/.")" != "$PUID:$PGID" ] || [ -n "$(find "$HOME" -maxdepth 2 \! -user roost -print -quit)" ]; then
+  log "fixing ownership of $HOME for $PUID:$PGID"
+  chown -R roost:roost "$HOME"
+fi
+chown -R roost:roost "$STATE/logs" "$STATE/state"
+if ! runuser -u roost -- test -w /workspace; then
+  log "WARNING: /workspace is not writable by PUID=$PUID PGID=$PGID; agents won't be able to edit files there."
+fi
+
+# Seed the home directory with defaults; never overwrites existing files.
+runuser -u roost -- cp -an /etc/roost/skel/. "$HOME/"
+runuser -u roost -- mkdir -p -m 0700 "$HOME/.ssh"
+
+# ------------------------------------------------------------------ sudo
+if [ "$ROOST_SUDO" = true ]; then
+  echo 'roost ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/roost
+  chmod 0440 /etc/sudoers.d/roost
+else
+  rm -f /etc/sudoers.d/roost
+fi
+
+# ------------------------------------------------------------------ secrets
+randpw() { tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1" || true; }
+
+WEB_AUTH=true
+if [ "${ROOST_PASSWORD:-}" = "none" ]; then
+  WEB_AUTH=false
+  log "WARNING: ROOST_PASSWORD=none: the web UI (including a shell) is open to anyone who can reach port $ROOST_PORT."
+elif [ -n "${ROOST_PASSWORD:-}" ]; then
+  WEB_PASSWORD="$ROOST_PASSWORD"
+else
+  if [ ! -s "$SECRETS/web-password" ]; then
+    randpw 24 > "$SECRETS/web-password"
+    log "generated a web UI password: user '$ROOST_USER', password '$(cat "$SECRETS/web-password")'"
+    log "(stored in $SECRETS/web-password; set ROOST_PASSWORD to choose your own)"
+  fi
+  WEB_PASSWORD="$(cat "$SECRETS/web-password")"
+fi
+
+# VNC: by default x11vnc only listens on localhost (reached through the
+# authenticated web UI). Setting ROOST_VNC_PASSWORD also opens port 5900 for
+# native VNC clients, protected by that password (VNC only uses 8 chars).
+if [ -n "${ROOST_VNC_PASSWORD:-}" ]; then
+  x11vnc -storepasswd "$ROOST_VNC_PASSWORD" "$SECRETS/vnc.pass" > /dev/null 2>&1
+  chown roost:roost "$SECRETS/vnc.pass"
+  chmod 0600 "$SECRETS/vnc.pass"
+  export ROOST_VNC_MODE=password
+else
+  rm -f "$SECRETS/vnc.pass"
+  export ROOST_VNC_MODE=localhost
+fi
+# Only the VNC file needs to be readable by roost.
+chown root:roost "$SECRETS"
+chmod 0750 "$SECRETS"
+[ -f "$SECRETS/web-password" ] && chmod 0600 "$SECRETS/web-password" && chown root:root "$SECRETS/web-password"
+
+# ------------------------------------------------------------------ Caddy (front door)
+{
+  echo "{"
+  echo "  admin off"
+  echo "  auto_https off"
+  echo "}"
+  echo ":$ROOST_PORT {"
+  if [ "$WEB_AUTH" = true ]; then
+    echo "  basicauth {"
+    echo "    $ROOST_USER $(caddy hash-password --plaintext "$WEB_PASSWORD")"
+    echo "  }"
+  fi
+  cat <<'EOF'
+  encode gzip
+  redir /code /code/
+  handle_path /code/* {
+    reverse_proxy 127.0.0.1:8443
+  }
+  redir /term /term/
+  handle /term/* {
+    reverse_proxy unix//run/roost/ttyd.sock
+  }
+  redir /files /files/
+  handle /files/* {
+    reverse_proxy 127.0.0.1:8081
+  }
+  redir /vnc /vnc/
+  handle_path /vnc/* {
+    reverse_proxy 127.0.0.1:6080
+  }
+  handle {
+    reverse_proxy 127.0.0.1:7682
+  }
+}
+EOF
+} > /run/roost/Caddyfile
+chown roost:roost /run/roost/Caddyfile
+chmod 0600 /run/roost/Caddyfile
+
+# ------------------------------------------------------------------ SSH
+for type in ed25519 rsa; do
+  key="$STATE/ssh/ssh_host_${type}_key"
+  [ -f "$key" ] || ssh-keygen -q -t "$type" -N '' -f "$key"
+done
+touch "$STATE/ssh/authorized_keys"
+if [ -n "${ROOST_SSH_AUTHORIZED_KEYS:-}" ]; then
+  # Accept newline- or comma-separated keys from the environment.
+  printf '%s\n' "${ROOST_SSH_AUTHORIZED_KEYS//,/$'\n'}" > "$STATE/ssh/authorized_keys"
+fi
+chmod 0644 "$STATE/ssh/authorized_keys"
+cat > /run/roost/sshd_config <<EOF
+Port $ROOST_SSH_PORT
+HostKey $STATE/ssh/ssh_host_ed25519_key
+HostKey $STATE/ssh/ssh_host_rsa_key
+PidFile /run/roost/sshd.pid
+AllowUsers roost
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys $STATE/ssh/authorized_keys
+StrictModes no
+UsePAM no
+X11Forwarding no
+AllowTcpForwarding yes
+PrintMotd no
+AcceptEnv LANG LC_* COLORTERM
+Subsystem sftp internal-sftp
+EOF
+
+# ------------------------------------------------------------------ optional CLI refresh
+if [ "$ROOST_UPDATE_ON_START" = true ]; then
+  log "updating claude-code, codex and playwright-mcp to latest..."
+  npm install -g --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest @playwright/mcp@latest \
+    > "$STATE/logs/update.log" 2>&1 || log "update failed (see $STATE/logs/update.log); continuing with bundled versions"
+fi
+
+# ------------------------------------------------------------------ per-user setup
+runuser -u roost -- /usr/local/bin/roost-init-user || log "user init reported a problem (continuing)"
+
+log "roost $(cat /etc/roost/version) starting: web UI on :$ROOST_PORT, ssh on :$ROOST_SSH_PORT (enabled=$ROOST_SSH)"
+exec /usr/bin/supervisord -c /etc/roost/supervisord.conf

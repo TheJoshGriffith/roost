@@ -1,0 +1,25 @@
+# FileBrowser Quantum, served at /files/ behind roost's login (so no auth of its own).
+http:
+  port: 8081
+  listen: 127.0.0.1
+  baseURL: /files
+server:
+  disableUpdateCheck: true
+  cacheDir: /config/roost/filebrowser-cache
+  database:
+    path: /config/roost/filebrowser.sqlite
+  filesystem:
+    createFilePermission: "664"
+    createDirectoryPermission: "775"
+  logging:
+    - levels: "info|warning|error"
+      output: stdout
+      noColors: true
+  sources:
+    - path: /workspace
+      name: workspace
+auth:
+  methods:
+    noauth: true
+frontend:
+  name: roost files

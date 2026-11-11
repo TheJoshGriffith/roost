@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>roost</Name>
+  <Repository>ghcr.io/thejoshgriffith/roost:latest</Repository>
+  <Registry>https://github.com/TheJoshGriffith/roost/pkgs/container/roost</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/TheJoshGriffith/roost/issues</Support>
+  <Project>https://github.com/TheJoshGriffith/roost</Project>
+  <Overview>An always-on home for Claude Code and Codex. Runs Claude Code's Remote Control server (drive it from claude.ai/code, the Claude mobile app or the desktop app), Codex in persistent tmux sessions, VS Code in the browser, a web terminal, a file browser, and a shared Chromium the agents can drive and you can VNC into. No Docker socket and no privileged mode: the container is the sandbox.</Overview>
+  <Category>Tools: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:7680]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/TheJoshGriffith/roost/main/unraid/roost.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/TheJoshGriffith/roost/main/rootfs/opt/roost/dash/public/icon.svg</Icon>
+  <ExtraParams>--hostname=roost --shm-size=1g --memory=8g --pids-limit=4096</ExtraParams>
+  <PostArgs/>
+  <Requires>A Claude Pro/Max (or Team/Enterprise) subscription for Remote Control. After the first start, open the WebUI; the login is "roost" and the generated password is printed in the container log (or set ROOST_PASSWORD).</Requires>
+  <Config Name="Web UI" Target="7680" Default="7680" Mode="tcp" Description="Dashboard, VS Code, terminal, files and browser (behind one login)." Type="Port" Display="always" Required="true" Mask="false">7680</Config>
+  <Config Name="SSH" Target="2222" Default="2222" Mode="tcp" Description="Key-only SSH as user roost (terminal clients, desktop app SSH connections)." Type="Port" Display="always" Required="false" Mask="false">2222</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/roost" Mode="rw" Description="Home directory, sign-ins, browser profile, settings and logs. Delete this to reset everything." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/roost</Config>
+  <Config Name="Workspace" Target="/workspace" Default="/mnt/user/dev" Mode="rw" Description="Projects the agents can read and write. Only map what you want them to touch." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/dev</Config>
+  <Config Name="Web UI password" Target="ROOST_PASSWORD" Default="" Mode="" Description="Password for user 'roost' on the web UI. Leave blank to generate one (printed in the log and saved in appdata/roost/roost/secrets/web-password)." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="SSH public keys" Target="ROOST_SSH_AUTHORIZED_KEYS" Default="" Mode="" Description="Public keys allowed to SSH in (comma-separated)." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Allow sudo" Target="ROOST_SUDO" Default="true" Mode="" Description="Let agents use sudo inside the container (apt installs etc.). It doesn't grant anything on the host." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="Instance name" Target="ROOST_NAME" Default="roost" Mode="" Description="Prefix for Remote Control session names in the Claude apps." Type="Variable" Display="always" Required="false" Mask="false">roost</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID that owns files written to the workspace." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID that owns files written to the workspace." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="002" Mode="" Description="File creation mask." Type="Variable" Display="advanced" Required="false" Mask="false">002</Config>
+  <Config Name="Timezone" Target="TZ" Default="Europe/London" Mode="" Description="Container timezone." Type="Variable" Display="advanced" Required="false" Mask="false">Europe/London</Config>
+  <Config Name="Claude permission mode" Target="ROOST_CLAUDE_PERMISSION_MODE" Default="" Mode="" Description="Optional default permission mode for Remote Control sessions (e.g. acceptEdits)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Screen size" Target="ROOST_SCREEN" Default="1600x900x24" Mode="" Description="Virtual display size for the shared browser." Type="Variable" Display="advanced" Required="false" Mask="false">1600x900x24</Config>
+  <Config Name="VNC password" Target="ROOST_VNC_PASSWORD" Default="" Mode="" Description="Set to also open raw VNC on port 5900 for native clients (8 chars max). Blank = browser-only VNC through the web UI." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="VNC" Target="5900" Default="" Mode="tcp" Description="Raw VNC (only used when a VNC password is set)." Type="Port" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Update CLIs on start" Target="ROOST_UPDATE_ON_START" Default="false" Mode="" Description="npm-update Claude Code and Codex at every start instead of waiting for a new image." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>

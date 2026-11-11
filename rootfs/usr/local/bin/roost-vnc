@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# roost-vnc: x11vnc on the shared display.
+#   default:            localhost only, no password; reached via the web UI (/vnc/), which is behind roost's login
+#   ROOST_VNC_PASSWORD: also listens on 0.0.0.0:5900 for native VNC clients, password protected
+set -euo pipefail
+
+common=(-display "$DISPLAY" -forever -shared -rfbport 5900 -noxdamage -quiet)
+if [ "${ROOST_VNC_MODE:-localhost}" = password ] && [ -s /config/roost/secrets/vnc.pass ]; then
+  exec x11vnc "${common[@]}" -rfbauth /config/roost/secrets/vnc.pass
+fi
+exec x11vnc "${common[@]}" -localhost -nopw

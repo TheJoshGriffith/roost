@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>roost</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="28" height="28">
+      <span class="name" id="name">roost</span>
+      <span class="ver" id="ver"></span>
+    </div>
+    <span class="live" id="live" title="Status refreshes every 5 seconds">connecting…</span>
+  </header>
+
+  <main>
+    <section id="setup" class="setup" hidden>
+      <h2>Finish setting up</h2>
+      <ol id="setup-list"></ol>
+    </section>
+
+    <section class="grid">
+      <article class="card wide" id="claude">
+        <div class="card-head">
+          <h3><span class="dot" id="claude-dot"></span>Claude Code · Remote Control</h3>
+          <a class="btn primary" href="https://claude.ai/code" target="_blank" rel="noopener">Open claude.ai/code ↗</a>
+        </div>
+        <p class="muted" id="claude-account"></p>
+        <p class="muted small">Sessions appear in claude.ai/code, the Claude mobile app and the desktop app's Code tab. They keep running when every client is closed.</p>
+        <div id="rc-list"></div>
+      </article>
+
+      <article class="card">
+        <h3><span class="dot" id="codex-dot"></span>Codex</h3>
+        <p class="muted" id="codex-state"></p>
+        <div class="actions">
+          <a class="btn" href="term/?arg=codex" target="_blank">Codex terminal</a>
+          <a class="btn" href="code/" target="_blank">In VS Code</a>
+        </div>
+        <p class="muted small">Runs in a persistent tmux session: close the tab and it keeps going. The Codex and Claude extensions are in VS Code too.</p>
+      </article>
+
+      <article class="card">
+        <h3><span class="dot" id="browser-dot"></span>Browser</h3>
+        <p class="muted" id="browser-state"></p>
+        <div class="actions">
+          <a class="btn" href="vnc/vnc.html?path=vnc/websockify&amp;autoconnect=true&amp;resize=scale&amp;reconnect=true" target="_blank">Open (VNC)</a>
+        </div>
+        <p class="muted small">The same Chromium the agents drive through the <code>browser</code> MCP. Jump in for CAPTCHAs and logins; its profile persists.</p>
+      </article>
+
+      <article class="card">
+        <h3>VS Code</h3>
+        <p class="muted">Edit, review diffs and view images and media in <code>/workspace</code>.</p>
+        <div class="actions"><a class="btn" href="code/" target="_blank">Open VS Code</a></div>
+      </article>
+
+      <article class="card">
+        <h3>Files</h3>
+        <p class="muted">Upload, download, preview and share files in <code>/workspace</code>.</p>
+        <div class="actions"><a class="btn" href="files/" target="_blank">Open files</a></div>
+      </article>
+
+      <article class="card">
+        <h3>Terminal</h3>
+        <p class="muted">Persistent tmux shell. <code>Ctrl-b s</code> switches sessions.</p>
+        <div class="actions">
+          <a class="btn" href="term/" target="_blank">Open terminal</a>
+          <a class="btn" href="term/?arg=claude" target="_blank">Claude CLI</a>
+        </div>
+        <p class="muted small" id="tmux-sessions"></p>
+      </article>
+
+      <article class="card">
+        <h3>Connect from elsewhere</h3>
+        <p class="muted small">From a terminal (or the desktop app's SSH connection):</p>
+        <pre class="cmd" id="ssh-cmd"></pre>
+        <p class="muted small" id="ssh-state"></p>
+        <p class="muted small">Then <code>tmux attach -t rc-workspace</code> for the Remote Control console, or just run <code>claude</code> / <code>codex</code>.</p>
+      </article>
+    </section>
+
+    <section class="card services">
+      <div class="card-head">
+        <h3>Services</h3>
+        <span class="muted small" id="versions"></span>
+      </div>
+      <table>
+        <thead><tr><th>Service</th><th>State</th><th class="hide-sm">Detail</th><th></th></tr></thead>
+        <tbody id="svc-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <dialog id="log-dialog">
+    <div class="dialog-head">
+      <h3 id="log-title">Log</h3>
+      <button class="btn" id="log-close" type="button">Close</button>
+    </div>
+    <pre id="log-body" class="console"></pre>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

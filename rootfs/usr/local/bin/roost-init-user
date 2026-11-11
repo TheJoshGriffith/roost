@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# roost-init-user: one-time (marker-guarded) setup run as the roost user at boot.
+# Each step runs once; delete the marker in /config/roost/state to redo it.
+set -uo pipefail
+
+STATE=/config/roost/state
+log() { echo "[roost] $*"; }
+once() { [ ! -e "$STATE/$1.done" ]; }
+done_() { touch "$STATE/$1.done"; }
+
+# Give Claude Code the shared browser (Playwright MCP over CDP to the VNC Chromium).
+if once claude-mcp-browser; then
+  if claude mcp add --scope user browser -- playwright-mcp --cdp-endpoint http://127.0.0.1:9222 > /dev/null 2>&1; then
+    done_ claude-mcp-browser
+    log "registered the 'browser' MCP server with Claude Code"
+  else
+    log "could not register the browser MCP server with Claude Code yet; will retry next boot"
+  fi
+fi
+
+# Install the Claude Code and Codex extensions into code-server, in the background
+# (needs network; never blocks startup).
+if once code-server-extensions; then
+  (
+    ok=true
+    for ext in anthropic.claude-code openai.chatgpt; do
+      code-server --install-extension "$ext" || ok=false
+    done
+    [ "$ok" = true ] && done_ code-server-extensions
+  ) > /config/roost/logs/code-server-extensions.log 2>&1 &
+fi
+
+exit 0
