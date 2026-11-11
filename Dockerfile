@@ -85,6 +85,7 @@ RUN cd /opt/roost/dash && npm ci --omit=dev --no-audit --no-fund && npm cache cl
 
 COPY rootfs/ /
 RUN chmod 0755 /usr/local/bin/roost-* \
+ && echo '. /etc/roost/root-switch.sh' >> /etc/bash.bashrc \
  && echo "${ROOST_VERSION}" > /etc/roost/version
 
 ENV HOME=/config/home \
