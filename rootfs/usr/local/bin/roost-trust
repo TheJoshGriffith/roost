@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# roost-trust <dir>: mark a directory as trusted in ~/.claude.json so headless
-# Claude Code (Remote Control) doesn't stop at the "Trust this folder?" prompt.
+# roost-trust <dir>: mark a directory as trusted in ~/.claude.json, and mark
+# first-run onboarding (theme picker etc.) as done, so Claude sessions that roost
+# starts in the background don't stall on prompts nobody is there to answer.
 set -euo pipefail
 
 dir="$(cd "${1:?usage: roost-trust <dir>}" && pwd)"
 cfg="$HOME/.claude.json"
 [ -f "$cfg" ] || exit 0
 
-if jq -e --arg p "$dir" '.projects[$p].hasTrustDialogAccepted == true' "$cfg" > /dev/null 2>&1; then
+if jq -e --arg p "$dir" '.projects[$p].hasTrustDialogAccepted == true and .hasCompletedOnboarding == true' "$cfg" > /dev/null 2>&1; then
   exit 0
 fi
 
 tmp="$(mktemp "$cfg.XXXXXX")"
-if jq --arg p "$dir" '.projects[$p] = ((.projects[$p] // {}) + {hasTrustDialogAccepted: true})' "$cfg" > "$tmp"; then
+if jq --arg p "$dir" '.projects[$p] = ((.projects[$p] // {}) + {hasTrustDialogAccepted: true})
+    | .hasCompletedOnboarding = true
+    | .theme = (.theme // "dark")' "$cfg" > "$tmp"; then
   mv "$tmp" "$cfg"
 else
   rm -f "$tmp"

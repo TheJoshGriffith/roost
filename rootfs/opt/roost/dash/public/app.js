@@ -116,7 +116,8 @@ async function refresh() {
 
 document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('button');
-  if (!t) return;
+  // Only the Overview tab and its log dialog belong to this handler (Projects has its own).
+  if (!t || !t.closest('#view-overview, #log-dialog')) return;
   try {
     if (t.dataset.restart) {
       t.disabled = true;

@@ -41,7 +41,22 @@
     return new Date(iso).toLocaleDateString();
   }
 
-  const openTerm = (session) => window.open(`term/?arg=${encodeURIComponent(session)}`, '_blank');
+  const termUrl = (session) => `term/?arg=${encodeURIComponent(session)}`;
+
+  // Browsers only allow pop-ups opened directly by a click, so open the tab first and
+  // point it at the terminal once the server has started the session.
+  async function inNewTab(work) {
+    const w = window.open('about:blank', '_blank');
+    try {
+      const session = await work();
+      if (!session) { if (w) w.close(); return; }
+      if (w) w.location.href = termUrl(session);
+      else location.href = termUrl(session);
+    } catch (e) {
+      if (w) w.close();
+      throw e;
+    }
+  }
   const relWorkspace = (p) => p.replace(/^\/workspace\/?/, '');
 
   // ------------------------------------------------------------ render
@@ -186,8 +201,7 @@
   async function openChat(key) {
     const c = findChat(key);
     if (c && c.active && !c.session && !confirm('This chat looks active somewhere else right now (written to in the last 90 seconds). Resume a second copy anyway?')) return;
-    const { session } = await api('POST', `api/chats/${key.replace(':', '/')}/open`);
-    openTerm(session);
+    await inNewTab(async () => (await api('POST', `api/chats/${key.replace(':', '/')}/open`)).session);
   }
 
   // ------------------------------------------------------------ project dialog
@@ -290,8 +304,7 @@
         case 'new-codex':
         case 'new-claude-here': {
           const tool = t.dataset.act === 'new-codex' ? 'codex' : 'claude';
-          const { session } = await api('POST', `api/projects/${encodeURIComponent(p.id)}/new-chat`, { tool, dir: t.dataset.dir });
-          openTerm(session);
+          await inNewTab(async () => (await api('POST', `api/projects/${encodeURIComponent(p.id)}/new-chat`, { tool, dir: t.dataset.dir })).session);
           break;
         }
         case 'edit': return openProjectDialog(p);
