@@ -51,6 +51,7 @@ fail=0
 check / 401 no || fail=1
 check / 200 || fail=1
 check /api/status 200 || fail=1
+check /api/projects 200 || fail=1
 check /code/ 302 || fail=1 # redirects to ./?folder=/workspace
 check "/code/?folder=/workspace" 200 || fail=1
 check /files/ 200 || fail=1

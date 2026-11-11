@@ -68,6 +68,19 @@ After that, open [claude.ai/code](https://claude.ai/code), or the Claude app on 
 | Files & diffs | Dashboard → **VS Code** or **Files** |
 | The shared browser | Dashboard → **Browser** (noVNC). Set `ROOST_VNC_PASSWORD` to also expose raw VNC on 5900 |
 
+### Projects view
+
+The dashboard opens on **Projects**: a tree of everything in `/workspace` (project → folder, repo or worktree → chats). Claude and Codex chats are discovered from their own transcripts, so chats started from claude.ai, the apps, the terminal or VS Code all show up. From there you can:
+
+- see each chat's title, last activity, and whether it's live, open in a terminal, or was driven over Remote Control,
+- read a chat's transcript, or **Resume** it (`claude --resume` / `codex resume`) in a persistent terminal,
+- start a new Claude or Codex chat in any project, folder or worktree,
+- **file chats** into projects by dragging them (or with *Move to…*), and **archive** ones you're done with,
+- create projects by cloning a repo, making a folder, or grouping existing folders, then rename, colour and pin them,
+- give a project its own Remote Control server (optionally one git worktree per session) from its Edit dialog.
+
+Organising only changes roost's view. It's stored in `/config/roost/projects.json`, and Claude's and Codex's own files are never modified. It can't reorganise the chat lists inside claude.ai or the Claude apps.
+
 ### Multiple projects
 
 By default, one Remote Control server serves `/workspace` and sessions start there. To give a project its own server, so that each session gets its own git worktree, add it to `/config/roost/rc-projects.conf`:
@@ -77,7 +90,7 @@ By default, one Remote Control server serves `/workspace` and sessions start the
 /workspace/my-app          worktree   My App
 ```
 
-The watchdog picks up changes within about 15 seconds.
+The watchdog picks up changes within about 15 seconds. The Projects view's Edit dialog edits this file for you.
 
 ## Configuration
 

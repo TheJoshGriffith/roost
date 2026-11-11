@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>roost</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=__V__">
 </head>
 <body>
   <header class="top">
@@ -14,10 +14,27 @@
       <span class="name" id="name">roost</span>
       <span class="ver" id="ver"></span>
     </div>
+    <nav class="tabs" role="tablist">
+      <a href="#projects" class="tab" data-view="projects" role="tab">Projects</a>
+      <a href="#overview" class="tab" data-view="overview" role="tab">Overview</a>
+    </nav>
     <span class="live" id="live" title="Status refreshes every 5 seconds">connecting…</span>
   </header>
 
-  <main>
+  <main id="view-projects" class="view" hidden>
+    <div class="toolbar">
+      <button class="btn primary" id="new-project" type="button">New project</button>
+      <input type="search" id="proj-filter" placeholder="Filter projects and chats…" autocomplete="off">
+      <label class="check"><input type="checkbox" id="show-archived"> Archived <span id="archived-count" class="muted"></span></label>
+      <span class="spacer"></span>
+      <button class="btn small" id="expand-all" type="button">Expand all</button>
+      <button class="btn small" id="collapse-all" type="button">Collapse all</button>
+    </div>
+    <p class="muted small hint">Every folder in <code>/workspace</code> is a project. Drag a chat onto a project to file it there, or create projects that group several folders. Grouping only changes this view: chats and files stay where they are.</p>
+    <div id="proj-tree" class="proj-tree"><p class="muted">Loading…</p></div>
+  </main>
+
+  <main id="view-overview" class="view" hidden>
     <section id="setup" class="setup" hidden>
       <h2>Finish setting up</h2>
       <ol id="setup-list"></ol>
@@ -96,6 +113,50 @@
     </section>
   </main>
 
+  <dialog id="proj-dialog">
+    <form method="dialog" id="proj-form">
+      <div class="dialog-head"><h3 id="proj-dialog-title">New project</h3></div>
+      <label class="field">Name <input name="name" id="pf-name" autocomplete="off"></label>
+      <div class="field" id="pf-source-wrap">
+        <span>Start from</span>
+        <label class="check"><input type="radio" name="source" value="folder" checked> New empty folder</label>
+        <label class="check"><input type="radio" name="source" value="git"> Clone a git repository</label>
+        <label class="check"><input type="radio" name="source" value="paths"> Group existing folders</label>
+      </div>
+      <label class="field" id="pf-git-wrap" hidden>Repository URL <input name="gitUrl" id="pf-git" placeholder="https://github.com/you/repo.git" autocomplete="off"></label>
+      <label class="field" id="pf-folder-wrap">Folder name in /workspace <input name="folder" id="pf-folder" placeholder="my-project" autocomplete="off"></label>
+      <label class="field" id="pf-paths-wrap" hidden>Folders (one per line, inside /workspace) <textarea name="paths" id="pf-paths" rows="3" placeholder="/workspace/api&#10;/workspace/web"></textarea></label>
+      <div class="field"><span>Colour</span><div class="swatches" id="pf-colors"></div></div>
+      <label class="field" id="pf-rc-wrap" hidden>Remote Control server for this project
+        <select id="pf-rc">
+          <option value="off">Off: use the main /workspace server</option>
+          <option value="same-dir">On: sessions share the project folder</option>
+          <option value="worktree">On: each session gets its own git worktree</option>
+          <option value="session">On: serve a single session</option>
+        </select>
+      </label>
+      <label class="check" id="pf-pin-wrap"><input type="checkbox" id="pf-pinned"> Pin to top</label>
+      <p class="error" id="pf-error" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn danger" id="pf-delete" type="button" hidden>Remove grouping</button>
+        <span class="spacer"></span>
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" id="pf-save" value="save">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="chat-dialog">
+    <div class="dialog-head">
+      <h3 id="chat-title">Chat</h3>
+      <span class="spacer"></span>
+      <button class="btn small primary" id="chat-open" type="button">Continue in terminal</button>
+      <button class="btn small" id="chat-close" type="button">Close</button>
+    </div>
+    <p class="muted small" id="chat-meta"></p>
+    <div id="chat-body" class="transcript"></div>
+  </dialog>
+
   <dialog id="log-dialog">
     <div class="dialog-head">
       <h3 id="log-title">Log</h3>
@@ -104,6 +165,7 @@
     <pre id="log-body" class="console"></pre>
   </dialog>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=__V__"></script>
+  <script src="projects.js?v=__V__"></script>
 </body>
 </html>

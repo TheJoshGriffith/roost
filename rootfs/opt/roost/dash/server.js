@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const projects = require('./projects');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
@@ -118,13 +119,30 @@ function tail(file, bytes = 64 * 1024) {
   }
 }
 
+function readBody(req, max = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let d = '';
+    req.on('data', (c) => { d += c; if (d.length > max) { reject(Object.assign(new Error('body too large'), { status: 413 })); req.destroy(); } });
+    req.on('end', () => resolve(d));
+    req.on('error', reject);
+  });
+}
+
+async function readJsonBody(req) {
+  const t = await readBody(req);
+  if (!t) return {};
+  try { return JSON.parse(t); } catch { throw Object.assign(new Error('invalid JSON'), { status: 400 }); }
+}
+
 function send(res, status, body, type = 'application/json') {
   const data = type === 'application/json' ? JSON.stringify(body) : body;
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(data);
 }
 
-const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
+const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/projects.js': 'projects.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
+// Changes on every dashboard restart (i.e. every image update), so browsers never run stale assets.
+const ASSET_VERSION = Date.now().toString(36);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
 const server = http.createServer(async (req, res) => {
@@ -133,7 +151,9 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && STATIC[p]) {
       const f = path.join(PUBLIC, STATIC[p]);
-      return send(res, 200, fs.readFileSync(f), TYPES[path.extname(f)]);
+      let body = fs.readFileSync(f);
+      if (f.endsWith('.html')) body = body.toString('utf8').replace(/__V__/g, ASSET_VERSION);
+      return send(res, 200, body, TYPES[path.extname(f)]);
     }
     if (req.method === 'GET' && p === '/api/health') return send(res, 200, { ok: true });
     if (req.method === 'GET' && p === '/api/status') {
@@ -146,14 +166,44 @@ const server = http.createServer(async (req, res) => {
       });
     }
     let m;
+    if (req.method === 'GET' && p === '/api/projects') return send(res, 200, await projects.tree());
+    if (req.method === 'GET' && (m = p.match(/^\/api\/chats\/(claude|codex)\/([A-Za-z0-9-]+)$/))) {
+      const items = await projects.transcript(`${m[1]}:${m[2]}`);
+      return items ? send(res, 200, { items }) : send(res, 404, { error: 'unknown chat' });
+    }
     if (req.method === 'GET' && (m = p.match(/^\/api\/logs\/([\w-]+)$/))) {
       if (!LOGS.has(m[1])) return send(res, 404, { error: 'unknown log' });
       return send(res, 200, tail(path.join(LOG_DIR, `${m[1]}.log`)), 'text/plain; charset=utf-8');
     }
-    if (req.method === 'POST') {
+    if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') {
       // A custom header can't be sent cross-origin without a CORS preflight we never
       // answer, so this blocks other sites from driving these endpoints via the browser.
       if (req.headers['x-roost'] !== '1') return send(res, 403, { error: 'missing X-Roost header' });
+      if (req.method === 'POST' && p === '/api/projects') return send(res, 201, await projects.create(await readJsonBody(req)));
+      if ((m = p.match(/^\/api\/projects\/([^/]+)$/))) {
+        const id = decodeURIComponent(m[1]);
+        if (req.method === 'PATCH') return send(res, 200, await projects.update(id, await readJsonBody(req)));
+        if (req.method === 'DELETE') { projects.remove(id); return send(res, 200, { ok: true }); }
+      }
+      if (req.method === 'POST' && (m = p.match(/^\/api\/projects\/([^/]+)\/(new-chat|remote-control)$/))) {
+        const id = decodeURIComponent(m[1]);
+        const b = await readJsonBody(req);
+        if (m[2] === 'new-chat') return send(res, 200, await projects.newChat(id, b.tool, b.dir));
+        return send(res, 200, await projects.setRemoteControl(id, !!b.enabled, b.mode));
+      }
+      if (req.method === 'POST' && p === '/api/chats/assign') {
+        const b = await readJsonBody(req);
+        projects.assign(b.chat, b.project || null);
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'POST' && p === '/api/chats/archive') {
+        const b = await readJsonBody(req);
+        projects.archive(b.chat, !!b.archived);
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'POST' && (m = p.match(/^\/api\/chats\/(claude|codex)\/([A-Za-z0-9-]+)\/open$/))) {
+        return send(res, 200, await projects.openChat(`${m[1]}:${m[2]}`));
+      }
       if ((m = p.match(/^\/api\/services\/([\w-]+)\/restart$/))) {
         if (!SERVICES.has(m[1])) return send(res, 404, { error: 'unknown service' });
         const r = await run('supervisorctl', [...SUPERVISOR, 'restart', m[1]], 30000);
@@ -176,7 +226,7 @@ const server = http.createServer(async (req, res) => {
     }
     return send(res, 404, { error: 'not found' });
   } catch (e) {
-    return send(res, 500, { error: String(e && e.message || e) });
+    return send(res, (e && e.status) || 500, { error: String((e && e.message) || e) });
   }
 });
 

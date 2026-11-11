@@ -51,6 +51,10 @@ if [ "$(stat -c %u:%g "$HOME/.")" != "$PUID:$PGID" ] || [ -n "$(find "$HOME" -ma
   chown -R roost:roost "$HOME"
 fi
 chown -R roost:roost "$STATE/logs" "$STATE/state"
+# A fresh Docker volume arrives root-owned; hand an empty workspace to the agent user.
+if [ "$(stat -c %u /workspace)" = 0 ] && [ -z "$(ls -A /workspace)" ]; then
+  chown roost:roost /workspace
+fi
 if ! runuser -u roost -- test -w /workspace; then
   log "WARNING: /workspace is not writable by PUID=$PUID PGID=$PGID; agents won't be able to edit files there."
 fi
