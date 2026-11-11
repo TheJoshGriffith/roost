@@ -74,7 +74,7 @@ if jq -e '.browser.up == true' "$tmp/status.json" > /dev/null; then echo "ok   b
 got="$(curl -s -o /dev/null -w '%{http_code}' -u "$auth" -X POST "http://127.0.0.1:$port/api/services/ttyd/restart")"
 if [ "$got" = 403 ]; then echo "ok   CSRF guard"; else echo "FAIL CSRF guard -> $got"; fail=1; fi
 
-docker exec -u roost "$name" bash -lc 'claude --version && codex --version && playwright-mcp --version && gh --version | head -1 && uv --version' || fail=1
+docker exec -u roost "$name" bash -lc 'claude --version && codex --version && playwright-mcp --version && gh --version | head -1 && glab --version | head -1 && uv --version' || fail=1
 docker exec "$name" bash -c 'test "$(stat -c %U /config/home)" = roost' && echo "ok   home owned by roost" || fail=1
 # The seeded Codex config must load (Codex refuses to start on an invalid setting).
 if docker exec -u roost "$name" bash -lc 'codex login status 2>&1' | grep -q 'Error loading configuration'; then

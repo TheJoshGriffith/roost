@@ -102,7 +102,9 @@ function accounts() {
       browserMcp: !!(claudeCfg.mcpServers && claudeCfg.mcpServers.browser),
     },
     codex: { signedIn: nonEmpty(path.join(HOME, '.codex/auth.json')) },
-    github: { signedIn: !!ghUser, user: ghUser },
+    // gh is signed in by its own login, or by a GH_TOKEN / GITHUB_TOKEN secret.
+    github: (() => { const t = secrets.env(); const tok = t.GH_TOKEN ? 'GH_TOKEN' : t.GITHUB_TOKEN ? 'GITHUB_TOKEN' : null; return { signedIn: !!ghUser || !!tok, user: ghUser || tok }; })(),
+    gitlab: { signedIn: !!secrets.env().GITLAB_TOKEN },
     ssh: { enabled: process.env.ROOST_SSH === 'true', port: Number(process.env.ROOST_SSH_PORT || 2222), authorizedKeys: keys },
   };
 }
@@ -171,6 +173,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
     if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
     if (req.method === 'GET' && p === '/api/secrets') return send(res, 200, await secrets.list());
+    if (req.method === 'GET' && p === '/api/secrets/tools') return send(res, 200, await secrets.tools(url.searchParams.get('refresh') === '1'));
     if (req.method === 'GET' && p === '/api/live/models') return send(res, 200, await live.models());
     if (req.method === 'GET' && p === '/api/live/stream') {
       const key = url.searchParams.get('key') || '';

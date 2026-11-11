@@ -75,6 +75,7 @@ function load() {
 }
 
 function save(v) {
+  toolCache = { at: 0, value: null };
   writePrivate(VAULT, JSON.stringify(v, null, 2) + '\n');
   regenerate(v);
 }
@@ -169,6 +170,10 @@ function writeAgentNotes(v) {
       for (const [name, k] of keys) out.push(`- ${k.hosts && k.hosts.length ? k.hosts.join(', ') : 'any host'} (key \`${name}\`)`);
       out.push('');
     }
+    const clis = [];
+    if (v.env.GH_TOKEN || v.env.GITHUB_TOKEN) clis.push(`\`gh\` (GitHub CLI) is signed in through ${v.env.GH_TOKEN ? 'GH_TOKEN' : 'GITHUB_TOKEN'}`);
+    if (v.env.GITLAB_TOKEN) clis.push(`\`glab\` (GitLab CLI) is signed in through GITLAB_TOKEN${v.env.GITLAB_HOST ? ` for ${v.env.GITLAB_HOST.value}` : ''}`);
+    if (clis.length) out.push(...clis.map((c) => `- ${c}.`), '');
     out.push('Never print, log, commit or send these values anywhere they weren\'t meant to go. If one is missing or rejected, ask the user to add or fix it in roost\'s Secrets page.', NOTE_END);
     block = out.join('\n');
   }
@@ -320,9 +325,56 @@ async function testKey(name, host) {
   return { host, ok, output: output.slice(0, 2000) || `ssh exited with ${r.code}` };
 }
 
+// ------------------------------------------------------------------ CLI sign-in status
+// gh and glab read GH_TOKEN / GITLAB_TOKEN (and GH_HOST / GITLAB_HOST) from the
+// environment, so check them exactly as an agent would run them.
+let toolCache = { at: 0, value: null };
+async function tools(force) {
+  if (!force && toolCache.value && Date.now() - toolCache.at < 60000) return toolCache.value;
+  const vars = env();
+  const e = { ...process.env, ...vars, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GLAB_NO_PROMPT: '1' };
+  const ghHost = vars.GH_HOST || 'github.com';
+  const glHost = vars.GITLAB_HOST || 'gitlab.com';
+  const [ghv, gh, glv, gl] = await Promise.all([
+    run('gh', ['--version'], { env: e }),
+    run('gh', ['auth', 'status', '--hostname', ghHost, '--json', 'hosts'], { env: e }),
+    run('glab', ['--version'], { env: e }),
+    run('glab', ['auth', 'status', '--hostname', glHost], { env: e, timeout: 20000 }),
+  ]);
+  let ghState = { signedIn: false };
+  try {
+    const acct = ((JSON.parse(gh.out).hosts || {})[ghHost] || []).find((a) => a.active) || null;
+    if (acct) {
+      const raw = String(acct.error || '');
+      const error = acct.state === 'success' ? null
+        : /401|bad credentials|invalid/i.test(raw) ? `GitHub rejected the token in ${acct.tokenSource || 'GH_TOKEN'} (bad credentials).`
+          : /timeout|dial|network|resolve/i.test(raw) ? 'Couldn\'t reach GitHub to check the token.'
+            : raw.split('\n')[0].slice(0, 160) || 'GitHub rejected the token.';
+      ghState = { signedIn: acct.state === 'success', user: acct.login || null, source: acct.tokenSource || null, error };
+    }
+  } catch { ghState.error = (gh.err || gh.out).trim().split('\n')[0] || null; }
+  const glText = (gl.out + gl.err).replace(/\x1b\[[0-9;]*m/g, '');
+  const glOk = glText.match(/Logged in to (\S+) as (\S+)(?: \(([^)]+)\))?/);
+  const glFail = /API call failed|No token|not logged|401/i.test(glText);
+  const value = {
+    gh: {
+      installed: ghv.code === 0, version: (ghv.out.match(/gh version (\S+)/) || [])[1] || null, host: ghHost,
+      ...ghState, token: vars.GH_TOKEN ? 'GH_TOKEN' : vars.GITHUB_TOKEN ? 'GITHUB_TOKEN' : null,
+    },
+    glab: {
+      installed: glv.code === 0, version: (glv.out.match(/glab (\S+)/) || [])[1] || null, host: glHost,
+      signedIn: !!glOk, user: glOk ? glOk[2] : null, source: glOk ? glOk[3] || null : null,
+      token: vars.GITLAB_TOKEN ? 'GITLAB_TOKEN' : null,
+      error: !glOk && vars.GITLAB_TOKEN && glFail ? 'GitLab rejected the token.' : null,
+    },
+  };
+  toolCache = { at: Date.now(), value };
+  return value;
+}
+
 // At start-up, rebuild the generated files from the vault (if there is one).
 function regenerateIfPresent() {
   if (fs.existsSync(VAULT)) regenerate();
 }
 
-module.exports = { list, env, regenerate, regenerateIfPresent, setEnv, deleteEnv, generateKey, importKey, updateKey, deleteKey, testKey, ENV_FILE };
+module.exports = { list, env, tools, regenerate, regenerateIfPresent, setEnv, deleteEnv, generateKey, importKey, updateKey, deleteKey, testKey, ENV_FILE };

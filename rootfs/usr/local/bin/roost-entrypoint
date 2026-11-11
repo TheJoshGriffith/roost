@@ -46,7 +46,7 @@ chown roost:roost /config "$HOME" "$STATE" "$STATE/logs" "$STATE/state" /run/roo
 chmod 0755 /config "$STATE" "$STATE/ssh"
 chmod 0700 "$SECRETS"
 # Re-own the home dir if PUID/PGID changed since it was created.
-if [ "$(stat -c %u:%g "$HOME/.")" != "$PUID:$PGID" ] || [ -n "$(find "$HOME" -maxdepth 2 \! -user roost -print -quit)" ]; then
+if [ "$(stat -c %u:%g "$HOME/.")" != "$PUID:$PGID" ] || [ -n "$(find "$HOME" -maxdepth 4 \! -user roost -print -quit)" ]; then
   log "fixing ownership of $HOME for $PUID:$PGID"
   chown -R roost:roost "$HOME"
 fi

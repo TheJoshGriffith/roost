@@ -8,7 +8,12 @@
 
 const SECRET_PRESETS = [
   { id: 'custom', label: 'Custom', name: '', description: '' },
-  { id: 'github', label: 'GitHub token', name: 'GH_TOKEN', description: 'GitHub token: gh CLI and git over HTTPS', gitHost: 'github.com', gitUser: 'oauth2', help: 'A fine-grained token limited to the repos roost works on is safest. gh and git both pick it up.' },
+  { id: 'github', label: 'GitHub token', name: 'GH_TOKEN', description: 'GitHub token: gh CLI and git over HTTPS', gitHost: 'github.com', gitUser: 'oauth2',
+    help: 'gh and git both pick it up. A fine-grained token limited to the repositories roost works on is safest.',
+    links: [
+      { href: 'https://github.com/settings/personal-access-tokens/new', label: 'Create a fine-grained token (recommended)' },
+      { href: 'https://github.com/settings/tokens/new?scopes=repo,read:org,workflow,gist&description=roost', label: 'Create a classic token with gh\u2019s scopes' },
+    ] },
   { id: 'gitlab', label: 'GitLab token', name: 'GITLAB_TOKEN', description: 'GitLab token: glab CLI and git over HTTPS', gitHost: 'gitlab.com', gitUser: 'oauth2' },
   { id: 'ha', label: 'Home Assistant', name: 'HASS_TOKEN', description: 'Home Assistant long-lived access token', help: 'Create one in Home Assistant under your profile → Security → Long-lived access tokens.' },
   { id: 'api', label: 'API key', name: 'API_KEY', description: '' },
@@ -16,12 +21,17 @@ const SECRET_PRESETS = [
 
 const Secrets = {
   data: null,
+  tools: null,
   loading: false,
   changedSinceRestart: false,
 
-  async refresh() {
+  async refresh(forceTools) {
     if (this.loading) return;
     this.loading = true;
+    // CLI status involves network calls to GitHub/GitLab: render the rest first.
+    api('GET', 'api/secrets/tools' + (forceTools ? '?refresh=1' : ''))
+      .then((t) => { this.tools = t; this.render(); })
+      .catch(() => {});
     try {
       this.data = await api('GET', 'api/secrets');
     } catch (e) {
@@ -35,7 +45,8 @@ const Secrets = {
   changed(msg) {
     this.changedSinceRestart = true;
     if (msg) toast(msg);
-    this.refresh();
+    this.tools = null;
+    this.refresh(true);
   },
 
   render() {
@@ -48,6 +59,33 @@ const Secrets = {
     const intro = h('div', { class: 'card card-pad sx-intro' },
       h('p', null, 'Keys and tokens the agents can use while they work: SSH keys for cloning and pushing, and secrets they get as environment variables.'),
       h('p', { class: 'small-print' }, icon('shield', 14), ' Values are write-only here. But anything an agent can use, it can also read, so prefer narrowly scoped tokens (e.g. a fine-grained GitHub token for specific repos).'));
+
+    // ---------------------------------------------------------- CLI tools
+    const t = this.tools;
+    const toolRow = (name, cli, st, connect, extra) => {
+      const state = !st ? { dot: '', text: 'Checking\u2026' }
+        : !st.installed ? { dot: 'bad', text: `${cli} isn\u2019t installed` }
+          : st.signedIn ? { dot: 'ok', text: `Signed in to ${st.host} as ${st.user || 'unknown'}${st.source ? ` (${st.source === 'oauth_token' ? 'browser sign-in' : st.source})` : ''}` }
+            : st.error ? { dot: 'bad', text: st.error }
+              : { dot: 'warn', text: `Not signed in to ${st.host}` };
+      return h('li', { class: 'sx-row' },
+        h('div', { class: 'sx-main' },
+          h('div', { class: 'sx-title' }, h('span', null, name), h('span', { class: 'mono sx-meta' }, cli + (st && st.version ? ' ' + st.version : ''))),
+          h('div', { class: 'sx-status' }, h('span', { class: 'dot ' + state.dot }), h('span', null, state.text))),
+        h('div', { class: 'sx-actions' },
+          st && st.signedIn
+            ? h('button', { type: 'button', class: 'btn ghost small', onclick: connect }, 'Change')
+            : h('button', { type: 'button', class: 'btn primary small', onclick: connect }, 'Connect'),
+          extra || null));
+    };
+    const cliCard = h('div', { class: 'card' },
+      h('ul', { class: 'sx-list' },
+        toolRow('GitHub', 'gh', t && t.gh, () => this.connectGitHub(),
+          t && t.gh && !t.gh.signedIn ? h('a', { class: 'btn ghost small', href: 'term/?arg=gh-login', target: '_blank', title: 'Sign in with a one-time code in your browser instead of a token' }, 'Browser sign-in') : null),
+        toolRow('GitLab', 'glab', t && t.glab, () => this.connectGitLab())),
+      h('div', { class: 'card-pad sx-foot' },
+        h('span', { class: 'small-print', style: 'flex:1' }, 'Agents can use ', h('code', null, 'gh'), ' and ', h('code', null, 'glab'), ' once they\u2019re connected. Tokens are stored as secrets below.'),
+        h('button', { type: 'button', class: 'btn ghost small', onclick: () => { this.tools = null; this.render(); this.refresh(true); } }, icon('refresh', 14), 'Check again')));
 
     // ---------------------------------------------------------- SSH keys
     const keyRow = (k) => h('li', { class: 'sx-row' },
@@ -100,13 +138,14 @@ const Secrets = {
 
     root.replaceChildren(
       intro,
+      sec('CLI tools', null, cliCard),
       sec('SSH keys', d.keys.length ? plural(d.keys.length, 'key') : null, keys),
       sec('Secrets', d.env.length ? plural(d.env.length, 'secret') : null, envs),
       apply);
   },
 
   // ---------------------------------------------------------- actions: secrets
-  editSecret(s) {
+  editSecret(s, presetId) {
     const isNew = !s;
     const fld = (label, input, help) => h('div', { class: 'field' }, h('label', { class: 'lbl', for: input.id || null }, label), input, help ? h('p', { class: 'help' }, help) : null);
     const preset = h('select', { class: 'input', id: 'sx-preset' }, SECRET_PRESETS.map((p) => h('option', { value: p.id }, p.label)));
@@ -119,7 +158,7 @@ const Secrets = {
     const gitUser = h('input', { class: 'input mono', id: 'sx-gituser', value: (s && s.gitUser) || '', placeholder: 'oauth2', autocomplete: 'off' });
     const gitFields = h('div', { class: 'sx-git', hidden: !gitOn.checked }, fld('Host', gitHost), fld('Username', gitUser, 'Usually anything works with a token; GitLab prefers oauth2.'));
     gitOn.addEventListener('change', () => { gitFields.hidden = !gitOn.checked; });
-    const presetHelp = h('p', { class: 'help', hidden: true });
+    const presetHelp = h('div', { class: 'help sx-preset-help', hidden: true });
     const caution = h('p', { class: 'sx-caution', hidden: true });
     const syncCaution = () => {
       const c = this.data && this.data.caution[name.value.trim()];
@@ -134,9 +173,11 @@ const Secrets = {
       if (p.description) desc.value = p.description;
       gitOn.checked = !!p.gitHost; gitFields.hidden = !p.gitHost;
       gitHost.value = p.gitHost || ''; gitUser.value = p.gitUser || '';
-      presetHelp.hidden = !p.help; presetHelp.textContent = p.help || '';
+      presetHelp.hidden = !p.help && !p.links;
+      presetHelp.replaceChildren(p.help ? h('p', null, p.help) : '', ...(p.links || []).map((l) => h('p', null, h('a', { href: l.href, target: '_blank', rel: 'noopener' }, l.label, ' ', icon('external', 12)))));
       syncCaution();
     });
+    if (isNew && presetId) { preset.value = presetId; preset.dispatchEvent(new Event('change')); }
     syncCaution();
     const err = h('p', { class: 'form-error', role: 'alert', hidden: true });
     const form = h('form', { id: 'sx-form', class: 'form' },
@@ -167,6 +208,52 @@ const Secrets = {
     });
     openSheet({ title: isNew ? 'Add a secret' : `Edit ${s.name}`, body: form, foot: [h('span', { class: 'spacer', hidden: true }), h('button', { type: 'button', class: 'btn', onclick: () => $('#sheet').close() }, 'Cancel'), save], onClose: () => { value.value = ''; } });
     if (matchMedia('(pointer: fine)').matches) (isNew ? name : value).focus();
+  },
+
+  connectGitHub() {
+    const existing = this.data && this.data.env.find((x) => x.name === 'GH_TOKEN');
+    if (existing) this.editSecret(existing); else this.editSecret(null, 'github');
+  },
+
+  connectGitLab() {
+    const d = this.data || { env: [] };
+    const tok = d.env.find((x) => x.name === 'GITLAB_TOKEN');
+    const fld = (label, input, help) => h('div', { class: 'field' }, h('label', { class: 'lbl', for: input.id || null }, label), input, help ? h('p', { class: 'help' }, help) : null);
+    const host = h('input', { class: 'input mono', id: 'gl-host', value: (this.tools && this.tools.glab && this.tools.glab.host) || 'gitlab.com', autocomplete: 'off', spellcheck: 'false' });
+    const value = h('input', { class: 'input mono', id: 'gl-token', type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: tok ? 'Leave blank to keep the current token' : 'glpat-\u2026' });
+    const link = h('a', { target: '_blank', rel: 'noopener' });
+    const syncLink = () => {
+      const hst = host.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '') || 'gitlab.com';
+      link.href = `https://${hst}/-/user_settings/personal_access_tokens?name=roost&scopes=api,read_repository,write_repository`;
+      link.replaceChildren(`Create a token on ${hst} (name and scopes filled in)`, ' ', icon('external', 12));
+    };
+    host.addEventListener('input', syncLink);
+    syncLink();
+    const err = h('p', { class: 'form-error', role: 'alert', hidden: true });
+    const form = h('form', { id: 'gl-form', class: 'form' },
+      fld('GitLab host', host, 'gitlab.com, or your own instance, e.g. gitlab.example.com.'),
+      h('div', { class: 'help sx-preset-help' }, h('p', null, link), h('p', null, 'Scopes: api (for glab), read_repository and write_repository (for git over HTTPS).')),
+      fld('Personal access token', value),
+      err);
+    const save = h('button', { type: 'submit', class: 'btn primary', form: 'gl-form' }, tok ? 'Save' : 'Connect');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      const hst = host.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase() || 'gitlab.com';
+      if (!tok && !value.value) { err.textContent = 'Paste the token.'; err.hidden = false; return; }
+      save.disabled = true;
+      try {
+        await api('PUT', 'api/secrets/env/GITLAB_TOKEN', { value: value.value || undefined, description: `GitLab token for ${hst}: glab CLI and git over HTTPS`, gitHost: hst, gitUser: 'oauth2' });
+        if (hst !== 'gitlab.com') await api('PUT', 'api/secrets/env/GITLAB_HOST', { value: hst, description: 'GitLab instance glab talks to' });
+        else if (d.env.some((x) => x.name === 'GITLAB_HOST')) await api('DELETE', 'api/secrets/env/GITLAB_HOST');
+        value.value = '';
+        $('#sheet').close();
+        this.changed(`GitLab connected (${hst})`);
+      } catch (x) { err.textContent = x.message; err.hidden = false; }
+      finally { save.disabled = false; }
+    });
+    openSheet({ title: tok ? 'GitLab connection' : 'Connect GitLab', body: form, foot: [h('span', { class: 'spacer', hidden: true }), h('button', { type: 'button', class: 'btn', onclick: () => $('#sheet').close() }, 'Cancel'), save], onClose: () => { value.value = ''; } });
+    if (matchMedia('(pointer: fine)').matches) (tok ? value : host).focus();
   },
 
   async deleteSecret(s) {

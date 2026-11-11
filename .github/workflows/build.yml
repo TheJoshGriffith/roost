@@ -41,12 +41,16 @@ jobs:
 
       - name: Resolve versions
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           # Pinning to the resolved versions busts the layer cache whenever a new CLI ships.
           echo "claude=$(npm view @anthropic-ai/claude-code version)" >> "$GITHUB_OUTPUT"
           echo "codex=$(npm view @openai/codex version)" >> "$GITHUB_OUTPUT"
           echo "pwmcp=$(npm view @playwright/mcp version)" >> "$GITHUB_OUTPUT"
+          echo "gh=$(gh release view -R cli/cli --json tagName -q .tagName | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+          echo "glab=$(curl -fsSL 'https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases?per_page=1' | jq -r '.[0].tag_name' | sed 's/^v//')" >> "$GITHUB_OUTPUT"
           echo "roost=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
@@ -76,6 +80,8 @@ jobs:
             CLAUDE_CODE_VERSION=${{ steps.v.outputs.claude }}
             CODEX_VERSION=${{ steps.v.outputs.codex }}
             PLAYWRIGHT_MCP_VERSION=${{ steps.v.outputs.pwmcp }}
+            GH_VERSION=${{ steps.v.outputs.gh }}
+            GLAB_VERSION=${{ steps.v.outputs.glab }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -102,4 +108,6 @@ jobs:
             CLAUDE_CODE_VERSION=${{ steps.v.outputs.claude }}
             CODEX_VERSION=${{ steps.v.outputs.codex }}
             PLAYWRIGHT_MCP_VERSION=${{ steps.v.outputs.pwmcp }}
+            GH_VERSION=${{ steps.v.outputs.gh }}
+            GLAB_VERSION=${{ steps.v.outputs.glab }}
           cache-from: type=gha

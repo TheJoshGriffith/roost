@@ -11,6 +11,8 @@ ARG ROOST_VERSION=dev
 ARG CODE_SERVER_VERSION=4.145.2
 ARG TTYD_VERSION=1.7.7
 ARG NOVNC_VERSION=1.7.0
+ARG GH_VERSION=2.103.3
+ARG GLAB_VERSION=1.130.0
 ARG FILEBROWSER_VERSION=2.0.2-stable
 ARG CLAUDE_CODE_VERSION=latest
 ARG CODEX_VERSION=latest
@@ -34,7 +36,7 @@ RUN apt-get update \
       tmux jq ripgrep fd-find less nano vim-tiny procps psmisc htop lsof iproute2 iputils-ping bind9-dnsutils \
       unzip zip xz-utils bzip2 file tree rsync \
       build-essential pkg-config python3 python3-pip python3-venv pipx \
-      tini supervisor caddy gh tzdata \
+      tini supervisor caddy tzdata \
       xvfb x11vnc openbox python3-websockify \
       chromium fonts-liberation fonts-noto-core fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/* \
@@ -61,6 +63,23 @@ RUN case "${TARGETARCH}" in \
  && dpkg -i code-server.deb \
  && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh \
  && rm -rf /tmp/*
+
+# GitHub CLI and GitLab CLI, from their official releases (checksums verified).
+# Both read tokens from the environment (GH_TOKEN / GITLAB_TOKEN), which roost's
+# Secrets page provides.
+RUN cd /tmp \
+ && gh_tar="gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+ && curl -fsSLO "https://github.com/cli/cli/releases/download/v${GH_VERSION}/${gh_tar}" \
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" | grep " ${gh_tar}\$" | sha256sum -c - \
+ && tar -xzf "${gh_tar}" \
+ && install -m 0755 "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh \
+ && glab_tar="glab_${GLAB_VERSION}_linux_${TARGETARCH}.tar.gz" \
+ && curl -fsSLO "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/${glab_tar}" \
+ && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/checksums.txt" | grep " ${glab_tar}\$" | sha256sum -c - \
+ && mkdir glab && tar -xzf "${glab_tar}" -C glab \
+ && install -m 0755 glab/bin/glab /usr/local/bin/glab \
+ && rm -rf /tmp/* \
+ && gh --version | head -1 && glab --version | head -1
 
 # The agents themselves, plus the MCP bridge that lets them drive the shared browser.
 RUN npm install -g --omit=dev \

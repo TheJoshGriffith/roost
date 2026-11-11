@@ -890,3 +890,8 @@ body[data-chat-open="true"] .toast { bottom: calc(120px + var(--safe-b)); }
 @media (min-width: 640px) {
   .sx-git { grid-template-columns: 2fr 1fr; }
 }
+
+.sx-status { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-2); }
+.sx-preset-help p { margin: 0; }
+.sx-preset-help p + p { margin-top: 6px; }
+.sx-preset-help a { display: inline-flex; align-items: center; gap: 4px; }

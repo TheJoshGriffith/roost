@@ -1445,7 +1445,7 @@ function setupSteps(s) {
   const waiting = (s.rc.projects || []).find((p) => /\(y\/n\)/i.test(p.console || ''));
   if (waiting) steps.push({ text: ['Remote Control in ', h('b', null, waiting.name || waiting.dir), ' is asking a question.'], answer: waiting.session });
   if (!a.codex.signedIn) steps.push({ text: ['Sign in to Codex with ', h('code', null, 'roost-setup codex'), '.'], optional: true });
-  if (!a.github.signedIn) steps.push({ text: ['Sign in to GitHub with ', h('code', null, 'roost-setup gh'), '.'], optional: true });
+  if (!a.github.signedIn) steps.push({ text: ['Connect GitHub (and GitLab) so agents can use ', h('code', null, 'gh'), ' / ', h('code', null, 'glab'), ' and clone private repos.'], optional: true, action: { label: 'Secrets', href: '#/secrets', internal: true } });
   if (a.ssh.enabled && a.ssh.authorizedKeys === 0) steps.push({ text: ['Add an SSH key (', h('code', null, 'roost-setup ssh'), ') to connect from terminals and the desktop app.'], optional: true });
   return steps;
 }
@@ -1458,7 +1458,7 @@ function renderOverview(s, view) {
   const attention = steps.length
     ? h('div', { class: 'card attn' }, h('ol', { class: 'attn-list' }, steps.map((st, k) => h('li', { class: 'attn-item' }, h('span', { class: 'n' }, String(k + 1)),
       h('span', { class: 'txt' }, st.text, st.optional ? h('span', { class: 'opt' }, 'optional') : null),
-      st.answer ? h('button', { type: 'button', class: 'btn primary small', onclick: () => view.onAnswer(st.answer) }, 'Answer \u201cy\u201d') : st.action ? h('a', { class: 'btn small', href: st.action.href, target: '_blank', onclick: view.onExternal }, st.action.label) : null))))
+      st.answer ? h('button', { type: 'button', class: 'btn primary small', onclick: () => view.onAnswer(st.answer) }, 'Answer \u201cy\u201d') : st.action ? h('a', { class: 'btn small', href: st.action.href, target: st.action.internal ? null : '_blank', onclick: st.action.internal ? null : view.onExternal }, st.action.label) : null))))
     : h('div', { class: 'card attn-done' }, icon('check', 18), 'All set up.');
 
   const rcRow = (p) => {
