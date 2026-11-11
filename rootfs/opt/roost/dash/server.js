@@ -141,7 +141,7 @@ function send(res, status, body, type = 'application/json') {
   res.end(data);
 }
 
-const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/projects.js': 'projects.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
+const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
 // Changes on every dashboard restart (i.e. every image update), so browsers never run stale assets.
 const ASSET_VERSION = Date.now().toString(36);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
@@ -169,6 +169,7 @@ const server = http.createServer(async (req, res) => {
     let m;
     if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
     if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
+    if (req.method === 'GET' && p === '/api/live/models') return send(res, 200, await live.models());
     if (req.method === 'GET' && p === '/api/live/stream') {
       const key = url.searchParams.get('key') || '';
       if (!/^(claude|codex):[A-Za-z0-9-]+$/.test(key)) return send(res, 400, { error: 'bad key' });
@@ -228,6 +229,12 @@ const server = http.createServer(async (req, res) => {
         projects.assign(b.chat, b.project || null);
         return send(res, 200, { ok: true });
       }
+      if (req.method === 'POST' && p === '/api/chats/rename') {
+        const b = await readJsonBody(req);
+        if (!/^(claude|codex):[A-Za-z0-9-]+$/.test(String(b.chat))) return send(res, 400, { error: 'bad chat key' });
+        await live.rename(b.chat, b.title);
+        return send(res, 200, { ok: true });
+      }
       if (req.method === 'POST' && p === '/api/chats/archive') {
         const b = await readJsonBody(req);
         projects.archive(b.chat, !!b.archived);
@@ -262,4 +269,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => console.log(`roost dashboard on 127.0.0.1:${PORT}`));
+// Only Caddy (with the login) should reach the dashboard; DASH_HOST exists for debugging.
+const HOST = process.env.DASH_HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => console.log(`roost dashboard on ${HOST}:${PORT}`));

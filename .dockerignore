@@ -2,6 +2,8 @@
 .github
 unraid
 docs
+design
+scripts
 *.md
 docker-compose.yml
 config

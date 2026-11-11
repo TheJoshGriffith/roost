@@ -2,6 +2,25 @@
 
 **An always-on home for Claude Code and Codex.** roost is one Docker container for your home server. Your agents keep working when your laptop is shut, and you can pick them up from any device.
 
+![roost on desktop: projects beside a Claude chat with an inline diff](docs/screenshots/desktop-chat-dark.png)
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/phone-chat-dark.png" alt="Chat on a phone"></td>
+    <td width="33%"><img src="docs/screenshots/phone-projects-light.png" alt="Projects tree on a phone"></td>
+    <td width="33%"><img src="docs/screenshots/phone-overview-dark.png" alt="Overview on a phone"></td>
+  </tr>
+  <tr>
+    <td align="center">Chat</td>
+    <td align="center">Projects</td>
+    <td align="center">Overview</td>
+  </tr>
+</table>
+
+<sub>Screenshots use demo data (<code>scripts/seed-demo.sh</code>, captured with <code>scripts/screenshots.mjs</code>).</sub>
+
+- **A built-in chat interface for Claude and Codex**, designed mobile-first. Chats stream as they're written. Tool calls show as compact cards that expand to diffs, command output and file previews. Approvals appear inline (Allow / Always allow / Deny), so you can keep agents in ask-first mode and answer from your phone. Every chat is an ordinary Claude Code or Codex session, so you can also resume it in a terminal or in the official apps.
+- **Projects**: a tree of everything in `/workspace` (project → repo / worktree / folder → chats), built from Claude's and Codex's own transcripts. File chats into projects, archive them, and start new ones anywhere.
 - **Claude Code Remote Control server.** Claude sessions run in the container. You drive them from [claude.ai/code](https://claude.ai/code), the Claude mobile app or the desktop app's Code tab. Nothing depends on your laptop being awake.
 - **Codex** in persistent tmux sessions, plus the Claude and Codex extensions in VS Code.
 - **VS Code in the browser** (code-server) for diffs, reviews, editing and image/media previews.

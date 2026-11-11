@@ -33,6 +33,8 @@ function humanText(content) {
   if (!text) return null;
   const s = text.trim();
   if (!s || s.startsWith('<') || s.startsWith('Caveat:') || s.startsWith('[Request interrupted')) return null;
+  // Codex injects AGENTS.md and environment context as user messages.
+  if (s.startsWith('# AGENTS.md instructions') || s.includes('<INSTRUCTIONS>') || s.includes('<environment_context>')) return null;
   return s;
 }
 
@@ -43,7 +45,7 @@ async function eachLine(file, fn) {
   }
 }
 
-const CLAUDE_INTERESTING = /"type":"(user|assistant|custom-title|ai-title|bridge-session|relocated|pr-link|summary)"/;
+const CLAUDE_INTERESTING = /"type":\s*"(user|assistant|custom-title|ai-title|bridge-session|relocated|pr-link|summary)"/;
 
 async function parseClaude(file, st) {
   const chat = {

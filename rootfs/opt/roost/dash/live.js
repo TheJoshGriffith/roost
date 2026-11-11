@@ -117,7 +117,7 @@ class LiveSession {
     if (!p) throw Object.assign(new Error('that request is no longer pending'), { status: 409 });
     this.pending.delete(id);
     p.resolve(decision, message);
-    this.emit({ t: 'permission-resolved', id, decision });
+    this.emit({ t: 'permission-resolved', id, decision, message: message || null });
     if (!this.pending.size) this.setStatus('tool');
   }
 
@@ -208,7 +208,7 @@ class ClaudeSession extends LiveSession {
         },
       });
       this.emit({
-        t: 'permission', id, name, input: toolInput, title: opts.title || null, description: opts.description || null,
+        t: 'permission', id, toolId: opts.toolUseID || null, name, input: toolInput, title: opts.title || null, description: opts.description || null,
         reason: opts.decisionReason || null, always: always.length ? describeAlways(always) : null,
       });
       this.setStatus('waiting');
@@ -299,13 +299,16 @@ class ClaudeSession extends LiveSession {
   }
 }
 
+// A label for what "Always allow" will do: allow-list rules ("Bash(npm test:*)"),
+// or, when Claude suggests a mode switch instead, "mode:<mode>".
 function describeAlways(updates) {
-  const parts = [];
+  const rules = [];
+  let mode = null;
   for (const u of updates) {
-    if (u.type === 'setMode') parts.push(`switch to ${u.mode}`);
-    else for (const r of u.rules || []) parts.push(r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName);
+    if (u.type === 'setMode') mode = mode || u.mode;
+    else for (const r of u.rules || []) rules.push(r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName);
   }
-  return parts.join(', ');
+  return rules.length ? rules.join(', ') : mode ? `mode:${mode}` : null;
 }
 
 function claudeToolResult(block, extra) {
@@ -658,4 +661,57 @@ setInterval(() => {
   }
 }, 60 * 1000).unref();
 
-module.exports = { watch, send, get, list, close, history, CODEX_MODES };
+// ------------------------------------------------------------------ models & renaming
+// Codex's model list comes from a short-lived app-server; answer from the cache at
+// once and refresh it in the background, so the UI never waits on it.
+let codexModels = { at: 0, list: null, loading: null };
+function refreshCodexModels() {
+  if (codexModels.loading) return codexModels.loading;
+  codexModels.loading = codexModelList()
+    .then((list) => { codexModels.list = list; })
+    .catch(() => {})
+    .finally(() => { codexModels.at = Date.now(); codexModels.loading = null; });
+  return codexModels.loading;
+}
+async function models() {
+  const claude = [{ v: '', label: 'Default model' }, { v: 'opus', label: 'Opus' }, { v: 'sonnet', label: 'Sonnet' }, { v: 'haiku', label: 'Haiku' }];
+  if (Date.now() - codexModels.at > (codexModels.list ? 3600 : 120) * 1000) {
+    const p = refreshCodexModels();
+    if (!codexModels.list) await Promise.race([p, new Promise((r) => setTimeout(r, 1500))]);
+  }
+  return { claude, codex: [{ v: '', label: 'Default model' }, ...(codexModels.list || [])] };
+}
+setTimeout(refreshCodexModels, 5000).unref(); // warm the cache after start-up
+
+// Ask a short-lived `codex app-server` which models this account can use.
+function codexModelList() {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(CODEX_BIN, ['app-server'], { cwd: process.env.HOME || '/', stdio: ['pipe', 'pipe', 'ignore'] });
+    const timer = setTimeout(() => { proc.kill(); reject(new Error('timeout')); }, 15000);
+    const send = (m) => proc.stdin.write(JSON.stringify(m) + '\n');
+    proc.on('error', (e) => { clearTimeout(timer); reject(e); });
+    readline.createInterface({ input: proc.stdout }).on('line', (line) => {
+      let m;
+      try { m = JSON.parse(line); } catch { return; }
+      if (m.id === 1) { send({ method: 'initialized', params: {} }); send({ id: 2, method: 'model/list', params: {} }); }
+      if (m.id === 2) {
+        clearTimeout(timer);
+        proc.kill();
+        if (m.error) return reject(new Error(m.error.message));
+        resolve(((m.result && m.result.data) || []).filter((x) => !x.hidden).map((x) => ({ v: x.model || x.id, label: x.displayName || x.model || x.id })));
+      }
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'roost', title: 'roost', version: '1' }, capabilities: null } });
+  });
+}
+
+async function rename(key, title) {
+  title = String(title || '').trim().slice(0, 120);
+  if (!title) throw Object.assign(new Error('title is empty'), { status: 400 });
+  const [tool, id] = key.split(':');
+  if (tool !== 'claude') throw Object.assign(new Error('Renaming Codex chats isn\'t supported yet'), { status: 400 });
+  const { renameSession } = await loadSdk();
+  await renameSession(id, title);
+}
+
+module.exports = { watch, send, get, list, close, history, models, rename, CODEX_MODES };

@@ -1,171 +1,72 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>roost</title>
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=__V__">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15171a" media="(prefers-color-scheme: dark)">
+<title>roost</title>
+<link rel="icon" href="icon.svg?v=__V__" type="image/svg+xml">
+<link rel="stylesheet" href="style.css?v=__V__">
 </head>
-<body>
-  <header class="top">
-    <div class="brand">
-      <img src="icon.svg" alt="" width="28" height="28">
-      <span class="name" id="name">roost</span>
-      <span class="ver" id="ver"></span>
-    </div>
-    <nav class="tabs" role="tablist">
-      <a href="#projects" class="tab" data-view="projects" role="tab">Projects</a>
-      <a href="#overview" class="tab" data-view="overview" role="tab">Overview</a>
-    </nav>
-    <span class="live" id="live" title="Status refreshes every 5 seconds">connecting…</span>
-  </header>
+<body data-route="projects" data-chat-open="false">
 
-  <main id="view-projects" class="view" hidden>
-    <div class="toolbar">
-      <button class="btn primary" id="new-project" type="button">New project</button>
-      <input type="search" id="proj-filter" placeholder="Filter projects and chats…" autocomplete="off">
-      <label class="check"><input type="checkbox" id="show-archived"> Archived <span id="archived-count" class="muted"></span></label>
-      <span class="spacer"></span>
-      <button class="btn small" id="expand-all" type="button">Expand all</button>
-      <button class="btn small" id="collapse-all" type="button">Collapse all</button>
-    </div>
-    <p class="muted small hint">Every folder in <code>/workspace</code> is a project. Drag a chat onto a project to file it there, or create projects that group several folders. Grouping only changes this view: chats and files stay where they are.</p>
-    <div id="proj-tree" class="proj-tree"><p class="muted">Loading…</p></div>
-  </main>
+<header class="appbar">
+  <a class="brand" href="#/projects" aria-label="roost home">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+      <rect class="bg" width="32" height="32" rx="8"/>
+      <path class="perch" d="M6.5 24h19" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+      <path class="fg" d="M10.5 22.5c0-4.6 2.6-8.2 6.7-8.2 1.5 0 2.6.5 3.6 1.5l3.1-1.5-1.5 3.1c.5 1 .5 2 .5 3.1 0 1-.5 2-1 2z"/>
+    </svg>
+    <span class="name">roost</span>
+    <span class="host" id="host"></span>
+  </a>
+  <nav class="tabs" aria-label="Main">
+    <a class="tab" href="#/projects" data-nav="projects">Projects <span class="nav-badge" data-needs-badge hidden></span></a>
+    <a class="tab" href="#/overview" data-nav="overview">Overview</a>
+  </nav>
+  <span class="conn" id="conn" title="Status refreshes every 5 seconds"><span class="dot"></span><span>Live</span><span class="conn-time" id="conn-time"></span></span>
+  <button class="icon-btn" id="theme-btn" type="button" aria-label="Colour theme: system"></button>
+</header>
 
-  <main id="view-overview" class="view" hidden>
-    <section id="setup" class="setup" hidden>
-      <h2>Finish setting up</h2>
-      <ol id="setup-list"></ol>
-    </section>
-
-    <section class="grid">
-      <article class="card wide" id="claude">
-        <div class="card-head">
-          <h3><span class="dot" id="claude-dot"></span>Claude Code · Remote Control</h3>
-          <a class="btn primary" href="https://claude.ai/code" target="_blank" rel="noopener">Open claude.ai/code ↗</a>
+<main class="views">
+  <section class="view" id="view-projects" aria-label="Projects">
+    <div class="projects-layout">
+      <div class="tree-pane">
+        <div class="view-scroll" id="tree-scroll">
+          <div class="toolbar">
+            <label class="search"><span class="sr-only">Filter projects and chats</span><input class="input" type="search" id="filter" placeholder="Filter projects and chats" autocomplete="off" enterkeyhint="search"></label>
+            <div class="tb-row">
+              <button class="toggle-chip" id="archived-btn" type="button" aria-pressed="false">Archived <span class="count" id="archived-count"></span></button>
+              <span class="spacer"></span>
+              <button class="icon-btn sm tb-desk" id="expand-all" type="button" aria-label="Expand all" title="Expand all"></button>
+              <button class="icon-btn sm tb-desk" id="collapse-all" type="button" aria-label="Collapse all" title="Collapse all"></button>
+              <button class="btn primary small" id="new-project" type="button"></button>
+            </div>
+          </div>
+          <div class="tree" id="tree"></div>
+          <div class="tree-foot" id="tree-foot"></div>
         </div>
-        <p class="muted" id="claude-account"></p>
-        <p class="muted small">Sessions appear in claude.ai/code, the Claude mobile app and the desktop app's Code tab. They keep running when every client is closed.</p>
-        <div id="rc-list"></div>
-      </article>
-
-      <article class="card">
-        <h3><span class="dot" id="codex-dot"></span>Codex</h3>
-        <p class="muted" id="codex-state"></p>
-        <div class="actions">
-          <a class="btn" href="term/?arg=codex" target="_blank">Codex terminal</a>
-          <a class="btn" href="code/" target="_blank">In VS Code</a>
-        </div>
-        <p class="muted small">Runs in a persistent tmux session: close the tab and it keeps going. The Codex and Claude extensions are in VS Code too.</p>
-      </article>
-
-      <article class="card">
-        <h3><span class="dot" id="browser-dot"></span>Browser</h3>
-        <p class="muted" id="browser-state"></p>
-        <div class="actions">
-          <a class="btn" href="vnc/vnc.html?path=vnc/websockify&amp;autoconnect=true&amp;resize=scale&amp;reconnect=true" target="_blank">Open (VNC)</a>
-        </div>
-        <p class="muted small">The same Chromium the agents drive through the <code>browser</code> MCP. Jump in for CAPTCHAs and logins; its profile persists.</p>
-      </article>
-
-      <article class="card">
-        <h3>VS Code</h3>
-        <p class="muted">Edit, review diffs and view images and media in <code>/workspace</code>.</p>
-        <div class="actions"><a class="btn" href="code/" target="_blank">Open VS Code</a></div>
-      </article>
-
-      <article class="card">
-        <h3>Files</h3>
-        <p class="muted">Upload, download, preview and share files in <code>/workspace</code>.</p>
-        <div class="actions"><a class="btn" href="files/" target="_blank">Open files</a></div>
-      </article>
-
-      <article class="card">
-        <h3>Terminal</h3>
-        <p class="muted">Persistent tmux shell. <code>Ctrl-b s</code> switches sessions.</p>
-        <div class="actions">
-          <a class="btn" href="term/" target="_blank">Open terminal</a>
-          <a class="btn" href="term/?arg=claude" target="_blank">Claude CLI</a>
-        </div>
-        <p class="muted small" id="tmux-sessions"></p>
-      </article>
-
-      <article class="card">
-        <h3>Connect from elsewhere</h3>
-        <p class="muted small">From a terminal (or the desktop app's SSH connection):</p>
-        <pre class="cmd" id="ssh-cmd"></pre>
-        <p class="muted small" id="ssh-state"></p>
-        <p class="muted small">Then <code>tmux attach -t rc-workspace</code> for the Remote Control console, or just run <code>claude</code> / <code>codex</code>.</p>
-      </article>
-    </section>
-
-    <section class="card services">
-      <div class="card-head">
-        <h3>Services</h3>
-        <span class="muted small" id="versions"></span>
       </div>
-      <table>
-        <thead><tr><th>Service</th><th>State</th><th class="hide-sm">Detail</th><th></th></tr></thead>
-        <tbody id="svc-body"></tbody>
-      </table>
-    </section>
-  </main>
-
-  <dialog id="proj-dialog">
-    <form method="dialog" id="proj-form">
-      <div class="dialog-head"><h3 id="proj-dialog-title">New project</h3></div>
-      <label class="field">Name <input name="name" id="pf-name" autocomplete="off"></label>
-      <div class="field" id="pf-source-wrap">
-        <span>Start from</span>
-        <label class="check"><input type="radio" name="source" value="folder" checked> New empty folder</label>
-        <label class="check"><input type="radio" name="source" value="git"> Clone a git repository</label>
-        <label class="check"><input type="radio" name="source" value="paths"> Group existing folders</label>
-      </div>
-      <label class="field" id="pf-git-wrap" hidden>Repository URL <input name="gitUrl" id="pf-git" placeholder="https://github.com/you/repo.git" autocomplete="off"></label>
-      <label class="field" id="pf-folder-wrap">Folder name in /workspace <input name="folder" id="pf-folder" placeholder="my-project" autocomplete="off"></label>
-      <label class="field" id="pf-paths-wrap" hidden>Folders (one per line, inside /workspace) <textarea name="paths" id="pf-paths" rows="3" placeholder="/workspace/api&#10;/workspace/web"></textarea></label>
-      <div class="field"><span>Colour</span><div class="swatches" id="pf-colors"></div></div>
-      <label class="field" id="pf-rc-wrap" hidden>Remote Control server for this project
-        <select id="pf-rc">
-          <option value="off">Off: use the main /workspace server</option>
-          <option value="same-dir">On: sessions share the project folder</option>
-          <option value="worktree">On: each session gets its own git worktree</option>
-          <option value="session">On: serve a single session</option>
-        </select>
-      </label>
-      <label class="check" id="pf-pin-wrap"><input type="checkbox" id="pf-pinned"> Pin to top</label>
-      <p class="error" id="pf-error" hidden></p>
-      <div class="dialog-actions">
-        <button class="btn danger" id="pf-delete" type="button" hidden>Remove grouping</button>
-        <span class="spacer"></span>
-        <button class="btn" value="cancel" formnovalidate>Cancel</button>
-        <button class="btn primary" id="pf-save" value="save">Create</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="chat-dialog">
-    <div class="dialog-head">
-      <h3 id="chat-title">Chat</h3>
-      <span class="spacer"></span>
-      <button class="btn small primary" id="chat-open" type="button">Continue in terminal</button>
-      <button class="btn small" id="chat-close" type="button">Close</button>
+      <section class="chat-pane" id="chat-pane" aria-label="Chat"></section>
     </div>
-    <p class="muted small" id="chat-meta"></p>
-    <div id="chat-body" class="transcript"></div>
-  </dialog>
+  </section>
 
-  <dialog id="log-dialog">
-    <div class="dialog-head">
-      <h3 id="log-title">Log</h3>
-      <button class="btn" id="log-close" type="button">Close</button>
-    </div>
-    <pre id="log-body" class="console"></pre>
-  </dialog>
+  <section class="view" id="view-overview" aria-label="Overview" hidden>
+    <div class="view-scroll"><div class="ov" id="ov"></div></div>
+  </section>
+</main>
 
-  <script src="app.js?v=__V__"></script>
-  <script src="projects.js?v=__V__"></script>
+<nav class="bottomnav" aria-label="Main">
+  <a href="#/projects" data-nav="projects"></a>
+  <a href="#/chat" data-nav="chat"></a>
+  <a href="#/overview" data-nav="overview"></a>
+</nav>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
+<dialog class="sheet menu" id="menu" aria-label="Actions"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="ui.js?v=__V__"></script>
+<script src="app.js?v=__V__"></script>
 </body>
 </html>
