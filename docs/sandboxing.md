@@ -31,6 +31,7 @@ roost assumes the agents inside it might do something dumb: delete files, instal
 - ttyd checks the WebSocket origin (`-O`). Dashboard actions need a custom header, so other sites can't trigger them from your browser.
 - Raw VNC is localhost-only unless you set `ROOST_VNC_PASSWORD`.
 - Each instance generates its own SSH host keys. SSH is key-only, root login is disabled, and only the `roost` user is allowed.
+- Codex's own command sandbox (bubblewrap) can't run in an unprivileged container either (same cause as Chromium below), so roost configures Codex with `sandbox_mode = "danger-full-access"` and `approval_policy = "untrusted"`: commands run unsandboxed inside the container, and Codex asks before running anything it doesn't know to be safe.
 - Chromium runs with `--no-sandbox`, because its own sandbox needs user namespaces that Docker's default seccomp blocks. A malicious page that escaped the renderer would land in the container, not on the host.
 
 ## Reset ladder

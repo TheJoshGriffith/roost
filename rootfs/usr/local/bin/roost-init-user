@@ -18,6 +18,22 @@ if once claude-mcp-browser; then
   fi
 fi
 
+# Codex: run without its (unavailable) sandbox, asking before untrusted commands.
+# Only adds the settings if they're absent; top-level TOML keys must precede tables.
+if once codex-sandbox; then
+  cfg="$HOME/.codex/config.toml"
+  mkdir -p "$HOME/.codex"
+  touch "$cfg"
+  add=""
+  grep -qE '^[[:space:]]*sandbox_mode[[:space:]]*=' "$cfg" || add+=$'sandbox_mode = "danger-full-access"\n'
+  grep -qE '^[[:space:]]*approval_policy[[:space:]]*=' "$cfg" || add+=$'approval_policy = "untrusted"\n'
+  if [ -n "$add" ]; then
+    { printf '# Added by roost: Codex sandboxing is unavailable in containers; approvals stay on.\n%s\n' "$add"; cat "$cfg"; } > "$cfg.roost-tmp" && mv "$cfg.roost-tmp" "$cfg"
+    log "configured Codex to run unsandboxed with approvals (container is the sandbox)"
+  fi
+  done_ codex-sandbox
+fi
+
 # Install the Claude Code and Codex extensions into code-server, in the background
 # (needs network; never blocks startup).
 if once code-server-extensions; then

@@ -352,4 +352,13 @@ async function setRemoteControl(projectId, enabled, mode) {
   return { dir, enabled, mode: mode || 'same-dir' };
 }
 
-module.exports = { tree, create, update, remove, assign, archive, openChat, newChat, setRemoteControl, transcript: chats.transcript };
+// Working folder for a new chat: a project's main folder, or a folder inside the workspace.
+async function resolveCwd(projectId, dir) {
+  if (dir) return workspacePath(dir);
+  const { projects } = await tree();
+  const p = projects.find((x) => x.id === projectId);
+  if (!p || !p.paths.length) throw httpError(404, 'unknown project');
+  return p.paths[0];
+}
+
+module.exports = { resolveCwd, tree, create, update, remove, assign, archive, openChat, newChat, setRemoteControl, transcript: chats.transcript };

@@ -1,5 +1,11 @@
 # Codex config (seeded by roost; edit freely, it won't be overwritten).
 
+# Codex's sandbox needs user namespaces, which an unprivileged container doesn't
+# have, so commands run unsandboxed (the container is the sandbox) and Codex asks
+# before running anything it doesn't know to be safe.
+sandbox_mode = "danger-full-access"
+approval_policy = "untrusted"
+
 # The shared, VNC-viewable Chromium (see ~/.codex/AGENTS.md).
 [mcp_servers.browser]
 command = "playwright-mcp"

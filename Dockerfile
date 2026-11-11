@@ -79,6 +79,10 @@ RUN userdel -r node \
  && mkdir -p /config /workspace \
  && install -d -m 1777 /tmp/.X11-unix
 
+# Dashboard dependencies first, so editing roost's own files doesn't re-run npm.
+COPY rootfs/opt/roost/dash/package.json rootfs/opt/roost/dash/package-lock.json /opt/roost/dash/
+RUN cd /opt/roost/dash && npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+
 COPY rootfs/ /
 RUN chmod 0755 /usr/local/bin/roost-* \
  && echo "${ROOST_VERSION}" > /etc/roost/version

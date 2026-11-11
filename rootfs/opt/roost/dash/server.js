@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const projects = require('./projects');
+const live = require('./live');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
@@ -166,7 +167,19 @@ const server = http.createServer(async (req, res) => {
       });
     }
     let m;
-    if (req.method === 'GET' && p === '/api/projects') return send(res, 200, await projects.tree());
+    if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
+    if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
+    if (req.method === 'GET' && p === '/api/live/stream') {
+      const key = url.searchParams.get('key') || '';
+      if (!/^(claude|codex):[A-Za-z0-9-]+$/.test(key)) return send(res, 400, { error: 'bad key' });
+      return live.watch(key, res, Number(url.searchParams.get('since') || 0));
+    }
+    if (req.method === 'GET' && p === '/api/live/history') {
+      const key = url.searchParams.get('key') || '';
+      if (!/^(claude|codex):[A-Za-z0-9-]+$/.test(key)) return send(res, 400, { error: 'bad key' });
+      const events = await live.history(key);
+      return events ? send(res, 200, { events }) : send(res, 404, { error: 'unknown chat' });
+    }
     if (req.method === 'GET' && (m = p.match(/^\/api\/chats\/(claude|codex)\/([A-Za-z0-9-]+)$/))) {
       const items = await projects.transcript(`${m[1]}:${m[2]}`);
       return items ? send(res, 200, { items }) : send(res, 404, { error: 'unknown chat' });
@@ -190,6 +203,25 @@ const server = http.createServer(async (req, res) => {
         const b = await readJsonBody(req);
         if (m[2] === 'new-chat') return send(res, 200, await projects.newChat(id, b.tool, b.dir));
         return send(res, 200, await projects.setRemoteControl(id, !!b.enabled, b.mode));
+      }
+      if (req.method === 'POST' && p.startsWith('/api/live/')) {
+        const b = await readJsonBody(req);
+        const action = p.slice('/api/live/'.length);
+        if (action === 'send') {
+          let cwd;
+          if (!b.key || b.key.split(':')[1].startsWith('new-')) cwd = await projects.resolveCwd(b.project, b.dir);
+          return send(res, 200, await live.send({ key: b.key, tool: b.tool, cwd, text: b.text, model: b.model, mode: b.mode }));
+        }
+        const s = live.get(String(b.key || ''));
+        if (action === 'interrupt') { await s.interrupt(); return send(res, 200, { ok: true }); }
+        if (action === 'permission') { s.answer(String(b.id), String(b.decision), b.message); return send(res, 200, { ok: true }); }
+        if (action === 'settings') {
+          if (typeof b.mode === 'string') await s.setMode(b.mode);
+          if (typeof b.model === 'string') await s.setModel(b.model);
+          return send(res, 200, { ok: true });
+        }
+        if (action === 'close') { live.close(String(b.key)); return send(res, 200, { ok: true }); }
+        return send(res, 404, { error: 'unknown action' });
       }
       if (req.method === 'POST' && p === '/api/chats/assign') {
         const b = await readJsonBody(req);

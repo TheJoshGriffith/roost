@@ -120,7 +120,9 @@ chmod 0750 "$SECRETS"
     echo "  }"
   fi
   cat <<'EOF'
-  encode gzip
+  # Don't compress the live chat stream (Server-Sent Events must flush immediately).
+  @compressible not path /api/live/stream
+  encode @compressible gzip
   redir /code /code/
   handle_path /code/* {
     reverse_proxy 127.0.0.1:8443

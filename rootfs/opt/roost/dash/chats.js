@@ -245,4 +245,11 @@ function toolLabel(name, input) {
   return a ? `${name}: ${clip(a, 140)}` : String(name);
 }
 
-module.exports = { scan, transcript };
+const fileFor = (key) => byKey.get(key) || null;
+function get(key) {
+  const f = byKey.get(key);
+  const hit = f && cache.get(f);
+  return hit ? hit.chat : null;
+}
+
+module.exports = { scan, transcript, fileFor, get, humanText };
