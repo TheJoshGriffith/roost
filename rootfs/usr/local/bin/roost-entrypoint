@@ -111,7 +111,7 @@ chmod 0750 "$SECRETS"
   echo "}"
   echo ":$ROOST_PORT {"
   if [ "$WEB_AUTH" = true ]; then
-    echo "  basicauth {"
+    echo "  basicauth bcrypt \"$ROOST_NAME (username: $ROOST_USER)\" {"
     echo "    $ROOST_USER $(caddy hash-password --plaintext "$WEB_PASSWORD")"
     echo "  }"
   fi

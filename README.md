@@ -5,7 +5,7 @@
 - **Claude Code Remote Control server.** Claude sessions run in the container. You drive them from [claude.ai/code](https://claude.ai/code), the Claude mobile app or the desktop app's Code tab. Nothing depends on your laptop being awake.
 - **Codex** in persistent tmux sessions, plus the Claude and Codex extensions in VS Code.
 - **VS Code in the browser** (code-server) for diffs, reviews, editing and image/media previews.
-- **Web terminal** (ttyd + tmux). Close the tab and your shells keep running.
+- **Web terminal** (ttyd + tmux). Close the tab and your shells keep running. Hold **Option** (macOS) or **Shift** while dragging to select text for copying.
 - **File browser** for uploading, downloading, previewing and sharing files in the workspace.
 - **A shared Chromium** that agents drive through the `browser` MCP (Playwright over CDP). You watch and take over through VNC in the browser, for CAPTCHAs, logins and the like.
 - **SSH** (key only) for terminal clients and the desktop app's SSH connections.
@@ -36,7 +36,7 @@ Everything sits behind one port (`7680`) and one login.
    `https://raw.githubusercontent.com/TheJoshGriffith/roost/main/unraid/roost.xml`
    (Or copy `unraid/roost.xml` to `/boot/config/plugins/dockerMan/templates-user/my-roost.xml`.)
 2. Point **Workspace** at the share your projects live in. Only map what you want the agents to touch.
-3. Start the container, then open the WebUI. The user is `roost`. The generated password is in the container log (and in `appdata/roost/roost/secrets/web-password`). You can also set **Web UI password** yourself.
+3. Start the container, then open the WebUI. The username is `roost` (not `root`). The generated password is in the container log (and in `appdata/roost/roost/secrets/web-password`). You can also set **Web UI password** yourself.
 
 ### Docker Compose
 
