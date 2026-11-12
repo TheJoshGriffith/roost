@@ -74,6 +74,19 @@ if jq -e '.browser.up == true' "$tmp/status.json" > /dev/null; then echo "ok   b
 got="$(curl -s -o /dev/null -w '%{http_code}' -u "$auth" -X POST "http://127.0.0.1:$port/api/services/ttyd/restart")"
 if [ "$got" = 403 ]; then echo "ok   CSRF guard"; else echo "FAIL CSRF guard -> $got"; fail=1; fi
 
+# Web previews: a server on some port, put on a preview port, is only shown with the dashboard's cookie.
+# shellcheck disable=SC2016 # expanded inside the container
+if docker exec -u roost "$name" bash -c '
+  set -e
+  mkdir -p /tmp/pv && echo preview-ok > /tmp/pv/index.html
+  (cd /tmp/pv && exec python3 -m http.server 3999 --bind 127.0.0.1 > /dev/null 2>&1) &
+  sleep 1
+  slot="$(curl -fsS -X POST -H "X-Roost: 1" -H "Content-Type: application/json" -d "{\"port\":3999}" http://127.0.0.1:7682/api/previews | jq -r .slot)"
+  cookie="$(curl -fsS -D - -o /dev/null http://127.0.0.1:7682/api/previews | sed -n "s/^[Ss]et-[Cc]ookie: \(roost_preview=[^;]*\).*/\1/p")"
+  test "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$slot/")" = 401
+  test "$(curl -fsS -b "$cookie" "http://127.0.0.1:$slot/")" = preview-ok
+'; then echo "ok   web preview port"; else echo "FAIL web preview port"; fail=1; fi
+
 docker exec -u roost "$name" bash -lc 'claude --version && codex --version && playwright-mcp --version && gh --version | head -1 && glab --version | head -1 && uv --version' || fail=1
 docker exec "$name" bash -c 'test "$(stat -c %U /config/home)" = roost' && echo "ok   home owned by roost" || fail=1
 # The seeded Codex config must load (Codex refuses to start on an invalid setting).

@@ -8,6 +8,7 @@ services:
     ports:
       - "7680:7680" # web UI
       - "2222:2222" # ssh (key only)
+      - "7700-7704:7700-7704" # web previews in the dashboard's viewer (keep the numbers the same)
     environment:
       PUID: "1000"
       PGID: "1000"

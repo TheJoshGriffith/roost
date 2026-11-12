@@ -31,7 +31,7 @@ jobs:
           dockerfile: Dockerfile
           failure-threshold: error
       - name: dashboard syntax
-        run: node --check rootfs/opt/roost/dash/server.js && node --check rootfs/opt/roost/dash/public/app.js
+        run: for f in rootfs/opt/roost/dash/*.js rootfs/opt/roost/dash/public/*.js; do node --check "$f" || exit 1; done
 
   build:
     needs: lint

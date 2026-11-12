@@ -26,10 +26,12 @@
     <a class="tab" href="#/overview" data-nav="overview">Overview</a>
     <a class="tab" href="#/secrets" data-nav="secrets">Secrets</a>
   </nav>
+  <button class="icon-btn" id="viewer-btn" type="button" aria-label="Viewer: browser and web previews" title="Viewer: browser and web previews" aria-pressed="false"></button>
   <span class="conn" id="conn" title="Status refreshes every 5 seconds"><span class="dot"></span><span>Live</span><span class="conn-time" id="conn-time"></span></span>
   <button class="icon-btn" id="theme-btn" type="button" aria-label="Colour theme: system"></button>
 </header>
 
+<div class="shell-row" id="shell-row">
 <main class="views">
   <section class="view" id="view-projects" aria-label="Projects">
     <div class="projects-layout">
@@ -61,6 +63,9 @@
     <div class="view-scroll"><div class="ov" id="secrets"></div></div>
   </section>
 </main>
+<div class="viewer-split" id="viewer-split" role="separator" aria-label="Resize viewer" title="Drag to resize, double-click to reset" hidden></div>
+<aside class="viewer" id="viewer" aria-label="Viewer" hidden></aside>
+</div>
 
 <nav class="bottomnav" aria-label="Main">
   <a href="#/projects" data-nav="projects"></a>
@@ -74,6 +79,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="ui.js?v=__V__"></script>
 <script src="secrets.js?v=__V__"></script>
+<script src="viewer.js?v=__V__"></script>
 <script src="app.js?v=__V__"></script>
 </body>
 </html>
