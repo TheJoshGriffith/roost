@@ -324,6 +324,7 @@ const treeHandlers = {
     { label: 'New Claude chat', icon: 'plus', onClick: () => newDraftChat(p, 'claude') },
     { label: 'New Codex chat', icon: 'plus', onClick: () => newDraftChat(p, 'codex') },
     'sep',
+    { label: 'Preview a web server…', icon: 'globe', onClick: () => Viewer.pick(anchor, p) },
     p.paths[0] ? { label: 'Open in VS Code', icon: 'code', href: 'code/?folder=' + encodeURIComponent(p.paths[0]) } : null,
     p.paths[0] ? { label: 'Open in Files', icon: 'folderOpen', href: 'files/files/workspace/' + encodeURI(relPath(p.paths[0])) } : null,
     p.other ? null : { label: 'Edit project', icon: 'pencil', onClick: () => treeHandlers.onEdit(p) },

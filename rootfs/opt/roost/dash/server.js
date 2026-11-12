@@ -1,6 +1,7 @@
 'use strict';
-// roost dashboard: a tiny zero-dependency status/control API plus a static page.
+// roost dashboard: a small status/control API, the live chat backend and a static page.
 // Listens on localhost only; Caddy puts it (and the login) on the public port.
+// previews.js also listens on the preview ports (see there for how those are guarded).
 
 const http = require('http');
 const fs = require('fs');
@@ -9,6 +10,7 @@ const { execFile } = require('child_process');
 const projects = require('./projects');
 const live = require('./live');
 const secrets = require('./secrets');
+const previews = require('./previews');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
@@ -138,13 +140,13 @@ async function readJsonBody(req) {
   try { return JSON.parse(t); } catch { throw Object.assign(new Error('invalid JSON'), { status: 400 }); }
 }
 
-function send(res, status, body, type = 'application/json') {
+function send(res, status, body, type = 'application/json', extra) {
   const data = type === 'application/json' ? JSON.stringify(body) : body;
-  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra });
   res.end(data);
 }
 
-const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/secrets.js': 'secrets.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
+const STATIC = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/secrets.js': 'secrets.js', '/viewer.js': 'viewer.js', '/style.css': 'style.css', '/icon.svg': 'icon.svg' };
 // Changes on every dashboard restart (i.e. every image update), so browsers never run stale assets.
 const ASSET_VERSION = Date.now().toString(36);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
@@ -157,7 +159,8 @@ const server = http.createServer(async (req, res) => {
       const f = path.join(PUBLIC, STATIC[p]);
       let body = fs.readFileSync(f);
       if (f.endsWith('.html')) body = body.toString('utf8').replace(/__V__/g, ASSET_VERSION);
-      return send(res, 200, body, TYPES[path.extname(f)]);
+      // The page (and the status poll below) renews the cookie that opens the preview ports.
+      return send(res, 200, body, TYPES[path.extname(f)], f.endsWith('.html') ? { 'Set-Cookie': previews.cookieHeader() } : undefined);
     }
     if (req.method === 'GET' && p === '/api/health') return send(res, 200, { ok: true });
     if (req.method === 'GET' && p === '/api/status') {
@@ -167,11 +170,13 @@ const server = http.createServer(async (req, res) => {
         versions, services: svc, rc, browser, accounts: accounts(),
         vnc: { mode: process.env.ROOST_VNC_MODE || 'localhost' },
         sudo: process.env.ROOST_SUDO === 'true',
-      });
+        previews: previews.list(),
+      }, undefined, { 'Set-Cookie': previews.cookieHeader() });
     }
     let m;
     if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
     if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
+    if (req.method === 'GET' && p === '/api/previews') return send(res, 200, previews.list(), undefined, { 'Set-Cookie': previews.cookieHeader() });
     if (req.method === 'GET' && p === '/api/secrets') return send(res, 200, await secrets.list());
     if (req.method === 'GET' && p === '/api/secrets/tools') return send(res, 200, await secrets.tools(url.searchParams.get('refresh') === '1'));
     if (req.method === 'GET' && p === '/api/live/models') return send(res, 200, await live.models());
@@ -198,6 +203,8 @@ const server = http.createServer(async (req, res) => {
       // A custom header can't be sent cross-origin without a CORS preflight we never
       // answer, so this blocks other sites from driving these endpoints via the browser.
       if (req.headers['x-roost'] !== '1') return send(res, 403, { error: 'missing X-Roost header' });
+      if (req.method === 'POST' && p === '/api/previews') return send(res, 200, previews.assign((await readJsonBody(req)).port), undefined, { 'Set-Cookie': previews.cookieHeader() });
+      if (req.method === 'DELETE' && (m = p.match(/^\/api\/previews\/(\d+)$/))) { previews.release(m[1]); return send(res, 200, { ok: true }); }
       if (req.method === 'POST' && p === '/api/projects') return send(res, 201, await projects.create(await readJsonBody(req)));
       if ((m = p.match(/^\/api\/projects\/([^/]+)$/))) {
         const id = decodeURIComponent(m[1]);
@@ -294,4 +301,5 @@ const server = http.createServer(async (req, res) => {
 // Only Caddy (with the login) should reach the dashboard; DASH_HOST exists for debugging.
 const HOST = process.env.DASH_HOST || '127.0.0.1';
 server.listen(PORT, HOST, () => console.log(`roost dashboard on ${HOST}:${PORT}`));
+previews.start();
 try { secrets.regenerateIfPresent(); } catch (e) { console.error('secrets: could not regenerate:', e.message); }

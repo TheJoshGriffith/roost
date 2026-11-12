@@ -86,7 +86,8 @@ After that, open [claude.ai/code](https://claude.ai/code), or the Claude app on 
 | Terminal / Claude CLI | `ssh -p 2222 roost@<server>`, then `tmux attach -t rc-workspace` (Remote Control console), or run `claude` / `codex` |
 | Codex | Dashboard → **Codex terminal** (persistent tmux session `codex`), the Codex extension in VS Code, or SSH |
 | Files & diffs | Dashboard → **VS Code** or **Files** |
-| The shared browser | Dashboard → **Browser** (noVNC). Set `ROOST_VNC_PASSWORD` to also expose raw VNC on 5900 |
+| The shared browser | Dashboard → **Browser** (noVNC), or the viewer panel. Set `ROOST_VNC_PASSWORD` to also expose raw VNC on 5900 |
+| Web apps you're building | The dashboard's viewer panel (see below), or a project's ⋯ → **Preview a web server…** |
 
 ### Projects view
 
@@ -112,6 +113,20 @@ The **Secrets** tab gives the agents what they need to work with your repositori
 
 New chats, terminals and SSH sessions pick up changes immediately. Running chats, the Remote Control server and VS Code need a restart; the page has a button for Remote Control. Values are stored in roost's home directory (`/config/home/.config/roost/`, mode 600) and are never sent back to the browser. Agents can read anything they're able to use, though, so use narrowly scoped tokens. See [docs/sandboxing.md](docs/sandboxing.md).
 
+### Viewer: the browser and your web apps
+
+The panel button in the app bar opens the **viewer**. It holds tabs for the shared browser (VNC) and any web server running inside roost, such as a dev server on `localhost:3001`. **+** lists what's listening, labelled by project folder. A project's ⋯ menu lists that project's own servers first. You can type in any port, even one whose server hasn't started yet. Its tab keeps retrying until the server answers.
+
+The viewer docks on the right or along the bottom, with a draggable divider. It can also float as a window you drag by its tab bar and resize from the corner, or fill the window. On a phone it always fills the screen. Tabs keep their page while you switch between them, and **↗** opens the current one in a browser tab of its own.
+
+Each web server is shown on a **preview port** of its own (`7700`–`7704`, set with `ROOST_PREVIEW_PORTS`). A sub-path such as `/preview/3001/` would break most apps, because they use root-relative URLs (`/api/…`, `/_next/…`, a WebSocket at `/`). So:
+
+- **Publish the preview ports with the same numbers** on the host (`7700-7704:7700-7704`). The viewer links to `http://<the host you opened roost on>:7700`.
+- Only people signed in to roost can open them. The dashboard sets an HttpOnly cookie, browsers send cookies to every port on the same host, and the preview ports refuse requests without it. The cookie is removed before the request reaches your app.
+- Your app sees requests as `localhost:<its port>`, so dev servers that check the `Host` header work without changes. `X-Forwarded-Host` carries the real host. `X-Frame-Options` and CSP `frame-ancestors` are removed so the app can be shown in the panel.
+- Preview ports are plain HTTP. If you reach roost through an HTTPS reverse proxy, browsers won't show http inside the https page. Use **↗** to open the preview in its own tab, or put a proxy on the preview ports too.
+- When every preview port is in use, opening another server reuses the port that went longest without being opened.
+
 ### Multiple projects
 
 By default, one Remote Control server serves `/workspace` and sessions start there. To give a project its own server, so that each session gets its own git worktree, add it to `/config/roost/rc-projects.conf`:
@@ -135,12 +150,13 @@ The watchdog picks up changes within about 15 seconds. The Projects view's Edit 
 | `ROOST_CLAUDE_RC_ARGS` | | Extra flags for `claude remote-control` |
 | `ROOST_SCREEN` | `1600x900x24` | Virtual display size |
 | `ROOST_VNC_PASSWORD` | | Also listen on `:5900` for native VNC clients |
+| `ROOST_PREVIEW_PORTS` | `7700-7704` | Ports for showing web servers in the viewer (a range and/or a comma list). `off` turns previews off |
 | `ROOST_BROWSER_FLAGS` | | Extra Chromium flags |
 | `ROOST_SSH`, `ROOST_BROWSER`, `ROOST_CODE_SERVER`, `ROOST_FILES`, `ROOST_CLAUDE_RC` | `true` | Turn components off |
 | `ROOST_UPDATE_ON_START` | `false` | `npm` update Claude Code / Codex at every start |
 | `PUID` / `PGID` / `UMASK` / `TZ` | `1000`/`1000`/`002`/`Etc/UTC` | Unraid template uses `99`/`100` |
 
-Ports: `7680` web, `2222` SSH, `5900` VNC (optional).
+Ports: `7680` web, `2222` SSH, `7700`–`7704` web previews (publish with the same numbers), `5900` VNC (optional).
 Volumes: `/config` (home directory, sign-ins, browser profile, logs), `/workspace` (projects).
 
 ## Updating and resetting
