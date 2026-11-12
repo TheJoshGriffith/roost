@@ -398,9 +398,29 @@ function updateNavBadges() {
 }
 
 // ------------------------------------------------------------------ overview
+// Plan usage is fetched only while the Overview is showing (the server caches it for a minute).
+async function refreshUsage(force) {
+  if (App.usageLoading) return;
+  App.usageLoading = true;
+  App.usage = { ...(App.usage || { claude: undefined, codex: undefined }), loading: true };
+  if (App.route === 'overview') renderOv();
+  try {
+    App.usage = await api('GET', 'api/usage' + (force ? '?refresh=1' : ''));
+  } catch (e) {
+    const err = { error: `Couldn’t load usage: ${e.message}` };
+    App.usage = { claude: err, codex: err };
+  } finally {
+    App.usageLoading = false;
+    App.usageAt = Date.now();
+    if (App.route === 'overview') renderOv();
+  }
+}
+
 function renderOv() {
   if (!App.status) return;
   const view = {
+    usage: App.usage || { claude: undefined, codex: undefined, loading: true },
+    onUsageRefresh: () => refreshUsage(true),
     consoles: App.consoles,
     onConsole: (sess) => { App.consoles.has(sess) ? App.consoles.delete(sess) : App.consoles.add(sess); renderOv(); },
     onAnswer: async (sess) => {
@@ -471,7 +491,7 @@ function onRoute() {
     document.body.dataset.chatOpen = 'false';
     if (route === 'projects' && mqDesk.matches && App.view.current) { App.view.current = null; chatView.show(null); }
   }
-  if (route === 'overview') renderOv();
+  if (route === 'overview') { renderOv(); if (!App.usageAt || Date.now() - App.usageAt > 60000) refreshUsage(); }
   if (route === 'secrets') { Secrets.render(); Secrets.refresh(); }
   renderTree();
 }
@@ -613,4 +633,5 @@ initShell();
   onRoute();
   setInterval(() => { if (!document.hidden) refreshProjects(); }, 10000);
   setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
+  setInterval(() => { if (!document.hidden && App.route === 'overview') refreshUsage(); }, 60000);
 })();

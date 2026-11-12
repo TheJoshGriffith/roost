@@ -1461,6 +1461,8 @@ function renderOverview(s, view) {
       st.answer ? h('button', { type: 'button', class: 'btn primary small', onclick: () => view.onAnswer(st.answer) }, 'Answer \u201cy\u201d') : st.action ? h('a', { class: 'btn small', href: st.action.href, target: st.action.internal ? null : '_blank', onclick: st.action.internal ? null : view.onExternal }, st.action.label) : null))))
     : h('div', { class: 'card attn-done' }, icon('check', 18), 'All set up.');
 
+  const usageCard = view.usage ? renderUsage(view.usage, s, view) : null;
+
   const rcRow = (p) => {
     const asking = /\(y\/n\)/i.test(p.console || '');
     const open = view.consoles.has(p.session);
@@ -1515,12 +1517,66 @@ function renderOverview(s, view) {
   const bad = s.services.filter((x) => x.state !== 'RUNNING').length;
   return [
     steps.length ? sec('Needs attention', plural(steps.length, 'item'), attention) : null,
+    usageCard ? sec('Plan usage', view.usage.loading ? 'checking\u2026' : h('button', { type: 'button', class: 'link-btn us-refresh', onclick: view.onUsageRefresh }, 'Refresh'), usageCard) : null,
     h('div', { class: 'ov-cols' },
       h('div', { class: 'ov-col' }, sec('Agents', null, h('div', { style: 'display:grid;gap:12px' }, claude, codex))),
       h('div', { class: 'ov-col' }, sec('Open', null, tools), sec('Connect from elsewhere', null, connect))),
     sec('Services', bad ? `${bad} not running` : 'all running', services, h('p', { class: 'versions', style: 'margin:8px 4px 0' }, versions)),
     steps.length ? null : sec('Setup', null, attention),
   ].filter(Boolean);
+}
+
+/* ======================================================= 8b. plan usage */
+// "3h 52m", "2d 7h", "14m": time until a window resets.
+function fmtUntil(ms) {
+  if (ms == null || isNaN(ms)) return '';
+  const m = Math.max(0, Math.round(ms / 60000));
+  if (m < 60) return `${m}m`;
+  const hh = Math.floor(m / 60);
+  if (hh < 24) return `${hh}h ${m % 60}m`;
+  return `${Math.floor(hh / 24)}d ${hh % 24}h`;
+}
+const PLAN_NAMES = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise', plus: 'Plus', prolite: 'Pro Lite', business: 'Business', edu: 'Edu' };
+const planName = (p) => (p ? PLAN_NAMES[p] || p.charAt(0).toUpperCase() + p.slice(1) : null);
+
+// One bar per window: how much is used, with a tick for how much of the window has gone by.
+// Left of the tick is under pace; past it, you'll run out before the window resets.
+function usageWindow(w) {
+  const pct = Math.max(0, Math.min(100, w.percent));
+  const reset = w.resetsAt ? new Date(w.resetsAt) : null;
+  const left = reset ? reset - Date.now() : null;
+  const elapsed = reset && w.mins ? Math.max(0, Math.min(100, 100 - (left / (w.mins * 60000)) * 100)) : null;
+  const level = pct >= 90 ? 'bad' : pct >= 75 || (elapsed != null && pct > elapsed + 15 && pct >= 40) ? 'warn' : 'ok';
+  const resetText = reset ? (left <= 0 ? 'Resetting now' : `Resets in ${fmtUntil(left)}`) : '';
+  return h('li', { class: 'us-row' },
+    h('div', { class: 'us-top' }, h('span', { class: 'us-label' }, w.label), h('span', { class: 'us-pct ' + level }, `${Math.round(pct)}%`, h('span', { class: 'muted' }, ' used'))),
+    h('div', { class: 'us-bar ' + level, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct)), 'aria-label': `${w.label}: ${Math.round(pct)}% used` },
+      h('span', { class: 'us-fill', style: `width:${pct}%` }),
+      elapsed != null ? h('span', { class: 'us-pace', style: `left:${elapsed}%`, title: `${Math.round(elapsed)}% of this window has gone by` }) : null),
+    h('div', { class: 'us-meta' },
+      h('span', { title: reset ? reset.toLocaleString() : '' }, resetText),
+      elapsed != null ? h('span', null, `${Math.round(elapsed)}% of the window gone`) : null));
+}
+
+function renderUsage(u, s, view) {
+  const a = s.accounts;
+  const block = (tool, name, data, signedIn) => {
+    const head = h('div', { class: 'card-h' }, toolBadge(tool, 'lg'),
+      h('div', { class: 'grow' }, h('h3', null, name), h('div', { class: 'sub' }, data && data.plan ? `${planName(data.plan)} plan` : signedIn ? 'Subscription' : 'Not signed in')));
+    let body;
+    if (!signedIn && !data) body = h('p', { class: 'small-print us-msg' }, `Sign in to ${name} to see its plan usage.`);
+    else if (data === undefined) body = h('p', { class: 'small-print us-msg' }, spinner(13), ' Checking\u2026');
+    else if (!data) body = h('p', { class: 'small-print us-msg' }, 'No subscription sign-in found.');
+    else if (data.error) body = h('p', { class: 'small-print us-msg' }, icon('info', 14), ' ', data.error);
+    else body = h('ul', { class: 'us-list' }, data.windows.map(usageWindow),
+      data.extra ? h('li', { class: 'us-row us-extra' }, `Extra usage: ${Math.round(data.extra.percent)}% of the monthly limit`) : null);
+    return h('div', { class: 'card us-card' }, head, body);
+  };
+  return h('div', null,
+    h('div', { class: 'us-grid' },
+      block('claude', 'Claude', u.claude, a.claude.signedIn),
+      block('codex', 'Codex', u.codex, a.codex.signedIn)),
+    h('p', { class: 'small-print', style: 'margin:8px 4px 0' }, 'The tick on each bar shows how much of the window has gone by. A bar past its tick is using the allowance faster than the window passes. Usage counts everything on the account, not just roost.'));
 }
 
 /* ======================================================= 9. sheets + menus */
