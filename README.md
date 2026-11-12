@@ -113,6 +113,10 @@ The **Secrets** tab gives the agents what they need to work with your repositori
 
 New chats, terminals and SSH sessions pick up changes immediately. Running chats, the Remote Control server and VS Code need a restart; the page has a button for Remote Control. Values are stored in roost's home directory (`/config/home/.config/roost/`, mode 600) and are never sent back to the browser. Agents can read anything they're able to use, though, so use narrowly scoped tokens. See [docs/sandboxing.md](docs/sandboxing.md).
 
+### Plan usage
+
+The **Overview** shows how much of your plan's usage windows you've used: for Claude the 5-hour and 7-day windows, plus any per-model weekly limit; for Codex, whatever windows its plan has. Each bar has a tick showing how much of the window has gone by, so a bar past its tick is running ahead of the allowance. The numbers cover the whole account, not just roost. They come from the same sources as Claude Code's `/usage` screen and Codex's rate-limit status, using roost's existing sign-ins. The Claude source is undocumented and may change. roost only reads Claude's sign-in token, never refreshes it; if the token has expired, the card says so until Claude next runs and renews it.
+
 ### Viewer: the browser and your web apps
 
 The panel button in the app bar opens the **viewer**. It holds tabs for the shared browser (VNC) and any web server running inside roost, such as a dev server on `localhost:3001`. **+** lists what's listening, labelled by project folder. A project's ⋯ menu lists that project's own servers first. You can type in any port, even one whose server hasn't started yet. Its tab keeps retrying until the server answers.

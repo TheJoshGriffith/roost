@@ -11,6 +11,7 @@ const projects = require('./projects');
 const live = require('./live');
 const secrets = require('./secrets');
 const previews = require('./previews');
+const usage = require('./usage');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
@@ -176,6 +177,7 @@ const server = http.createServer(async (req, res) => {
     let m;
     if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
     if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
+    if (req.method === 'GET' && p === '/api/usage') return send(res, 200, await usage.all(url.searchParams.get('refresh') === '1'));
     if (req.method === 'GET' && p === '/api/previews') return send(res, 200, previews.list(), undefined, { 'Set-Cookie': previews.cookieHeader() });
     if (req.method === 'GET' && p === '/api/secrets') return send(res, 200, await secrets.list());
     if (req.method === 'GET' && p === '/api/secrets/tools') return send(res, 200, await secrets.tools(url.searchParams.get('refresh') === '1'));
