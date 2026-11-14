@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck -x rootfs/usr/local/bin/roost-*
+        run: shellcheck -x rootfs/usr/local/bin/roost-* host/deploy/roost-deploy-gate
       - name: hadolint
         uses: hadolint/hadolint-action@v3.1.0
         with:

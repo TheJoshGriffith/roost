@@ -1,0 +1,43 @@
+# Tier 1 of docs/host-access.md: a filtered view of the host's Docker for roost.
+# On Unraid, use unraid/roost-socket-proxy.xml instead.
+#
+# roost can list and inspect containers and images, read logs, and start,
+# stop and restart containers. It can't create containers, exec, copy files
+# in or out, or delete anything. POST stays 0: with POST=1 roost could create
+# a privileged container and own the host.
+#
+# Run this next to roost's own compose file (same project, or join roost to
+# the roost-ops network), then set DOCKER_HOST=tcp://roost-socket-proxy:2375
+# on roost's Secrets page. Publish no ports.
+services:
+  roost-socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:latest
+    container_name: roost-socket-proxy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run
+    mem_limit: 128m
+    pids_limit: 256
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      POST: "0"
+      CONTAINERS: "1"     # list + inspect (inspect shows containers' env vars)
+      ALLOW_LOGS: "1"
+      ALLOW_RESTARTS: "1" # restart, stop, kill
+      ALLOW_START: "1"
+      IMAGES: "1"
+      NETWORKS: "1"
+      INFO: "1"
+      EVENTS: "1"
+      EXEC: "0"
+      ALLOW_ARCHIVE: "0"
+      ALLOW_EXPORT: "0"
+      TZ: Etc/UTC
+    networks:
+      - roost-ops
+
+networks:
+  roost-ops:
+    name: roost-ops

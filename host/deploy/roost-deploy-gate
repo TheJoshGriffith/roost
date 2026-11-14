@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2016 # single-quoted strings below are jq programs
+# roost-deploy-gate: runs ON THE HOST, as the forced command of one SSH key.
+#
+# It lets roost deploy Docker Compose stacks, but only from a git branch you
+# review and merge, and only stacks that pass a policy check that rejects the
+# usual ways a container takes over its host (privileged, host namespaces,
+# extra capabilities, devices, the Docker socket, bind mounts outside an
+# allowlist). It never runs anything from the command line it receives: the
+# request is parsed into a fixed set of verbs and a validated stack name.
+#
+# Install: see docs/host-access.md. In short, root's authorized_keys gets
+#   restrict,command="/bin/bash /mnt/user/appdata/roost-deploy/roost-deploy-gate" ssh-ed25519 AAAA... roost-deploy
+# `restrict` matters: without it the key could forward the Docker socket.
+#
+# Config: deploy.conf next to this script (sourced; keep it root-owned and
+# outside anything roost can see).
+set -euo pipefail
+umask 077
+
+GATE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# ------------------------------------------------------------------ settings
+REPO_DIR="$GATE_HOME/repo"          # a clone of your stacks repo (fetch-only credentials)
+BRANCH="main"                       # only this branch, as fetched from origin, is ever deployed
+STACKS_DIR="stacks"                 # stacks/<name>/compose.yaml (or compose.yml, docker-compose.yml)
+STATE_DIR="$GATE_HOME/state"        # what was deployed when, plus the log
+RUN_DIR="$GATE_HOME/run"            # the checked-out files each stack runs from
+ENV_DIR="$GATE_HOME/env"            # optional <stack>.env per stack, for values kept out of git
+ALLOWED_BIND_PREFIXES="/mnt/user/appdata/"  # space-separated; bind mounts must sit under one of these
+ALLOWED_CAPS=""                     # space-separated cap_add values to accept, e.g. "NET_ADMIN"
+ALLOW_DEVICES=0                     # 1 to accept `devices:` (GPUs, USB sticks...)
+ALLOWED_SIGNERS=""                  # path to an ssh allowed_signers file: require signed commits
+ROOST_CONTAINER="roost"             # refuse to run if roost can see GATE_HOME
+GIT_IMAGE="alpine/git:latest"       # used only when the host has no git
+JQ_IMAGE="ghcr.io/jqlang/jq:latest" # used only when the host has no jq
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# shellcheck source=/dev/null
+[ -f "$GATE_HOME/deploy.conf" ] && . "$GATE_HOME/deploy.conf"
+LOG="$STATE_DIR/deploy.log"
+mkdir -p "$STATE_DIR" "$RUN_DIR" "$ENV_DIR"
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'roost-deploy: %s\n' "$*" >&2; log "refused: $*"; exit 1; }
+log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; logger -t roost-deploy -- "$*" 2> /dev/null || true; }
+have() { command -v "$1" > /dev/null 2>&1; }
+
+git_() {
+  if have git; then
+    git -C "$REPO_DIR" -c safe.directory="$REPO_DIR" "$@"
+  else
+    docker run --rm -i -v "$REPO_DIR:/repo" -w /repo -e HOME=/tmp "$GIT_IMAGE" -c safe.directory=/repo "$@"
+  fi
+}
+jq_() {
+  if have jq; then jq "$@"; else docker run --rm -i "$JQ_IMAGE" "$@"; fi
+}
+
+# Unraid exposes one share under /mnt/user, /mnt/cache, /mnt/disk1... Compare
+# share-relative paths there; elsewhere compare real paths.
+norm() {
+  local p
+  p="$(realpath -m -- "$1")"
+  case "$p" in
+    /mnt/*/*) p="/mnt/@/${p#/mnt/*/}" ;;
+    /mnt/?*) p="/mnt/@" ;;
+  esac
+  printf '%s/\n' "${p%/}"
+}
+under() { # under <path> <prefix>: is path at or below prefix?
+  local p q
+  p="$(norm "$1")" q="$(norm "$2")"
+  [[ "$p" == "$q"* ]]
+}
+overlaps() { under "$1" "$2" || under "$2" "$1"; }
+
+# ------------------------------------------------------------------ guards
+self_check() {
+  # If roost can write here, it can rewrite this script and own the host.
+  # Fails closed: a wrong container name must not quietly switch the check off.
+  if [ -n "$ROOST_CONTAINER" ]; then
+    local mounts src
+    mounts="$(docker inspect -f '{{range .Mounts}}{{println .Source}}{{end}}' "$ROOST_CONTAINER" 2> /dev/null)" \
+      || die "can't inspect container '$ROOST_CONTAINER'. Set ROOST_CONTAINER in deploy.conf to roost's container name."
+    while IFS= read -r src; do
+      [ -n "$src" ] || continue
+      if overlaps "$GATE_HOME" "$src"; then
+        die "roost mounts $src, which overlaps $GATE_HOME. Move the gate somewhere roost can't see."
+      fi
+    done <<< "$mounts"
+  fi
+  [ -d "$REPO_DIR/.git" ] || die "no git clone at $REPO_DIR (see docs/host-access.md)"
+}
+
+valid_stack() {
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]] || die "bad stack name: '$1' (lowercase letters, digits, - and _)"
+}
+
+compose_file_in() { # compose_file_in <dir>
+  local f
+  for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+    [ -f "$1/$f" ] && { printf '%s\n' "$1/$f"; return 0; }
+  done
+  return 1
+}
+
+fetch() {
+  git_ fetch --quiet --prune origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || die "git fetch failed"
+  TARGET="$(git_ rev-parse --verify "refs/remotes/origin/$BRANCH^{commit}")"
+  if [ -n "$ALLOWED_SIGNERS" ]; then
+    git_ -c gpg.ssh.allowedSignersFile="$ALLOWED_SIGNERS" verify-commit "$TARGET" > /dev/null 2>&1 \
+      || die "origin/$BRANCH ($TARGET) isn't signed by an allowed signer"
+  fi
+}
+
+stack_at() { # stack_at <commit> <stack>: does the stack exist at that commit?
+  git_ cat-file -e "$1:$STACKS_DIR/$2" 2> /dev/null
+}
+
+deployed_commit() { cat "$STATE_DIR/$1.commit" 2> /dev/null || true; }
+
+checkout() { # checkout <commit> <stack> [dest]: export the stack's files (default RUN_DIR/<stack>)
+  local dest="${3:-$RUN_DIR/$2}" tmp="$RUN_DIR/.$2.new"
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  git_ archive --format=tar "$1" "$STACKS_DIR/$2" | tar -x -C "$tmp" --strip-components=2
+  rm -rf "$dest"
+  mv "$tmp" "$dest"
+}
+
+compose() { # compose <stack> <args...>: run docker compose with a clean environment
+  local stack="$1" dir="${COMPOSE_DIR:-$RUN_DIR/$1}" file envf=()
+  shift
+  file="$(compose_file_in "$dir")" || die "no compose file in $STACKS_DIR/$stack"
+  [ -f "$ENV_DIR/$stack.env" ] && envf=(--env-file "$ENV_DIR/$stack.env")
+  env -i PATH="$PATH" HOME="${HOME:-/root}" \
+    docker compose -p "$stack" --project-directory "$dir" -f "$file" "${envf[@]}" "$@"
+}
+
+# The policy check works on `docker compose config`, which resolves extends,
+# includes, profiles and interpolation into one normalised document. It's a
+# backstop for review, not a replacement for it.
+policy() { # policy <stack> [dir]: check the stack checked out in dir (default RUN_DIR/<stack>)
+  local stack="$1" dir="${2:-$RUN_DIR/$1}" cfg problems=() line
+  cfg="$(COMPOSE_DIR="$dir" compose "$stack" config --format json)" \
+    || { say "docker compose config failed for $stack (see above)."; log "config failed: $stack"; return 1; }
+
+  while IFS= read -r line; do
+    [ -n "$line" ] && problems+=("$line")
+  done < <(jq_ -r --arg caps "$ALLOWED_CAPS" --arg devices "$ALLOW_DEVICES" '
+    ($caps | split(" ") | map(select(. != ""))) as $okcaps
+    | (.services // {}) | to_entries[] | .key as $s | .value as $v
+    | (
+        (if $v.privileged == true then "\($s): privileged" else empty end),
+        (if ($v.network_mode // "") == "host" then "\($s): network_mode: host" else empty end),
+        # Sharing another container pid namespace reaches its files through
+        # /proc/<pid>/root (the socket proxy has the Docker socket), so only
+        # private namespaces pass.
+        (["pid","uts","userns_mode","cgroup"][] as $k
+          | select(($v[$k] // "") != "" and $v[$k] != "private") | "\($s): \($k): \($v[$k])"),
+        (select(($v.ipc // "") | IN("", "private", "shareable", "none") | not) | "\($s): ipc: \($v.ipc)"),
+        (if (($v.volumes_from // []) | length) > 0 then "\($s): volumes_from" else empty end),
+        (($v.cap_add // [])[] | ascii_upcase | ltrimstr("CAP_")
+          | select(. as $c | $okcaps | index($c) | not) | "\($s): cap_add \(.)"),
+        (if $devices != "1" and (($v.devices // []) | length) > 0 then "\($s): devices" else empty end),
+        (($v.security_opt // [])[] | select(test("unconfined|disable|no-new-privileges[:=]false"))
+          | "\($s): security_opt \(.)"),
+        (if ($v.cgroup_parent // "") != "" then "\($s): cgroup_parent" else empty end)
+      )
+  ' <<< "$cfg")
+
+  # Bind mounts (service volumes, plus named volumes that are binds in disguise).
+  local kind src ro svc ok p
+  # shellcheck disable=SC2034 # kind is only there to keep the columns aligned
+  while IFS=$'\t' read -r kind svc src ro; do
+    [ -n "$src" ] || continue
+    case "$src" in
+      *docker.sock* | */run/docker*) problems+=("$svc: mounts the Docker socket ($src)"); continue ;;
+    esac
+    case "$src" in
+      /*) ;;
+      *) problems+=("$svc: bind source isn't an absolute path ($src)"); continue ;;
+    esac
+    # Files shipped with the stack itself (config files) may be mounted read-only.
+    if under "$src" "$dir" && [ "$ro" = true ]; then continue; fi
+    ok=0
+    for p in $ALLOWED_BIND_PREFIXES; do under "$src" "$p" && ok=1 && break; done
+    if [ "$ok" = 0 ]; then
+      problems+=("$svc: bind mount outside ALLOWED_BIND_PREFIXES ($src)")
+    elif overlaps "$src" "$GATE_HOME"; then
+      problems+=("$svc: mounts the deploy gate's own files ($src)")
+    fi
+  done < <(jq_ -r '
+    ((.services // {}) | to_entries[] | .key as $s
+      | (.value.volumes // [])[] | select(.type == "bind")
+      | ["service", $s, .source, ((.read_only // false) | tostring)]),
+    ((.volumes // {}) | to_entries[] | select((.value.driver_opts.device // "") != "")
+      | ["volume", "volume \(.key)", .value.driver_opts.device, "false"]),
+    ((.secrets // {}), (.configs // {}) | to_entries[] | select((.value.file // "") != "")
+      | ["file", "secret/config \(.key)", .value.file, "true"])
+    | @tsv
+  ' <<< "$cfg")
+
+  if [ "${#problems[@]}" -gt 0 ]; then
+    say "Policy check failed for $stack:"
+    printf '  - %s\n' "${problems[@]}"
+    say "Fix the stack, or widen deploy.conf on the host if this is intended."
+    log "policy failed: $stack: ${problems[*]}"
+    return 1
+  fi
+  say "Policy check passed for $stack."
+}
+
+# ------------------------------------------------------------------ verbs
+usage() {
+  cat << EOF
+roost-deploy: deploy reviewed stacks from origin/$BRANCH.
+
+  list                      stacks on origin/$BRANCH and what's deployed
+  status [stack]            containers of one stack, or of every stack deployed here
+  plan <stack>              what deploy would change: commits, file diff, policy check
+  deploy <stack> [--pull] [--recreate]
+                            deploy origin/$BRANCH (--pull: fetch newer images;
+                            --recreate: recreate containers even if unchanged)
+  rollback <stack>          redeploy the commit that was live before the last deploy
+  retire <stack>            stop and remove a stack that has been deleted from $BRANCH
+                            (volumes are kept)
+  log [n]                   the last n lines of the deploy log (default 30)
+  help
+EOF
+}
+
+cmd_list() {
+  fetch
+  say "origin/$BRANCH is at ${TARGET:0:12}"
+  local s d
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    d="$(deployed_commit "$s")"
+    printf '  %-28s %s\n' "$s" "${d:+deployed ${d:0:12}}${d:-not deployed}"
+  done < <(git_ ls-tree --name-only "$TARGET" "$STACKS_DIR/" | sed "s|^$STACKS_DIR/||")
+  for d in "$STATE_DIR"/*.commit; do
+    [ -e "$d" ] || continue
+    s="$(basename "$d" .commit)"
+    stack_at "$TARGET" "$s" || printf '  %-28s %s\n' "$s" "deployed, but deleted from $BRANCH (retire it)"
+  done
+}
+
+cmd_status() {
+  if [ -n "${1:-}" ]; then
+    valid_stack "$1"
+    [ -n "$(deployed_commit "$1")" ] || die "$1 hasn't been deployed from here"
+    compose "$1" ps
+  else
+    local d
+    for d in "$STATE_DIR"/*.commit; do
+      [ -e "$d" ] || { say "Nothing deployed from here yet."; return 0; }
+      say "== $(basename "$d" .commit)"
+      compose "$(basename "$d" .commit)" ps || true
+    done
+  fi
+}
+
+cmd_plan() {
+  local stack="$1" cur
+  valid_stack "$stack"
+  fetch
+  stack_at "$TARGET" "$stack" || die "no $STACKS_DIR/$stack on origin/$BRANCH"
+  cur="$(deployed_commit "$stack")"
+  if [ -n "$cur" ]; then
+    say "Deployed: ${cur:0:12}   origin/$BRANCH: ${TARGET:0:12}"
+    git_ log --oneline "$cur..$TARGET" -- "$STACKS_DIR/$stack"
+    git_ --no-pager diff --stat "$cur" "$TARGET" -- "$STACKS_DIR/$stack"
+    git_ --no-pager diff "$cur" "$TARGET" -- "$STACKS_DIR/$stack"
+  else
+    say "Not deployed yet. origin/$BRANCH: ${TARGET:0:12}"
+    git_ ls-tree -r --name-only "$TARGET" "$STACKS_DIR/$stack"
+  fi
+  # Check the candidate in a scratch dir, without touching the live checkout.
+  local scratch="$RUN_DIR/.plan-$stack"
+  checkout "$TARGET" "$stack" "$scratch"
+  policy "$stack" "$scratch" || true
+  rm -rf "$scratch"
+}
+
+do_deploy() { # do_deploy <stack> <commit> <verb> [compose up flags...]
+  local stack="$1" commit="$2" verb="$3" prev
+  shift 3
+  prev="$(deployed_commit "$stack")"
+  checkout "$commit" "$stack"
+  if ! policy "$stack"; then
+    # Put the previous files back so status/rollback keep working.
+    if [ -n "$prev" ]; then checkout "$prev" "$stack"; else rm -rf "${RUN_DIR:?}/$stack"; fi
+    exit 1
+  fi
+  log "$verb $stack ${prev:0:12} -> ${commit:0:12} $*"
+  if compose "$stack" up -d --remove-orphans "$@"; then
+    [ -n "$prev" ] && [ "$prev" != "$commit" ] && printf '%s\n' "$prev" > "$STATE_DIR/$stack.previous"
+    printf '%s\n' "$commit" > "$STATE_DIR/$stack.commit"
+    log "$verb $stack ok"
+    say "$stack is at ${commit:0:12}."
+  else
+    log "$verb $stack FAILED"
+    if [ -n "$prev" ] && [ "$prev" != "$commit" ]; then
+      say "docker compose up failed. Putting $stack back to ${prev:0:12}..."
+      checkout "$prev" "$stack"
+      if compose "$stack" up -d --remove-orphans; then
+        log "$verb $stack restored ${prev:0:12}"
+        die "deploy of ${commit:0:12} failed; $stack is back on ${prev:0:12}."
+      fi
+      log "$verb $stack restore of ${prev:0:12} FAILED"
+      die "deploy of ${commit:0:12} failed, and so did putting ${prev:0:12} back. Check 'status $stack'."
+    fi
+    die "docker compose up failed for $stack."
+  fi
+}
+
+cmd_deploy() {
+  local stack="$1" flags=()
+  shift
+  valid_stack "$stack"
+  for a in "$@"; do
+    case "$a" in
+      --pull) flags+=(--pull always) ;;
+      --recreate) flags+=(--force-recreate) ;;
+      *) die "unknown option: $a" ;;
+    esac
+  done
+  fetch
+  stack_at "$TARGET" "$stack" || die "no $STACKS_DIR/$stack on origin/$BRANCH"
+  do_deploy "$stack" "$TARGET" deploy "${flags[@]}"
+}
+
+cmd_rollback() {
+  local stack="$1" prev
+  valid_stack "$stack"
+  prev="$(cat "$STATE_DIR/$stack.previous" 2> /dev/null || true)"
+  [ -n "$prev" ] || die "no earlier deploy of $stack to roll back to"
+  # Only commits that were once deployed from origin/$BRANCH get recorded, so
+  # this can't be used to run anything that wasn't reviewed.
+  do_deploy "$stack" "$prev" rollback
+}
+
+cmd_retire() {
+  local stack="$1"
+  valid_stack "$stack"
+  [ -n "$(deployed_commit "$stack")" ] || die "$stack hasn't been deployed from here"
+  fetch
+  stack_at "$TARGET" "$stack" && die "$stack is still on origin/$BRANCH. Delete it there (and merge) first."
+  log "retire $stack $(deployed_commit "$stack")"
+  compose "$stack" down --remove-orphans
+  rm -rf "${RUN_DIR:?}/$stack" "$STATE_DIR/$stack.commit" "$STATE_DIR/$stack.previous"
+  log "retire $stack ok"
+  say "$stack retired. Its volumes and appdata are untouched."
+}
+
+# ------------------------------------------------------------------ main
+# Over SSH the request arrives in SSH_ORIGINAL_COMMAND; locally, as arguments
+# (handy for testing as root). Split on whitespace only: no globbing, no shell.
+if [ -n "${SSH_ORIGINAL_COMMAND+x}" ]; then
+  set -f
+  # shellcheck disable=SC2086
+  set -- $SSH_ORIGINAL_COMMAND
+  set +f
+fi
+verb="${1:-help}"
+[ $# -gt 0 ] && shift
+
+case "$verb" in
+  help | -h | --help) usage; exit 0 ;;
+  log) n="${1:-30}"; [[ "$n" =~ ^[0-9]{1,4}$ ]] || die "log takes a number"; tail -n "$n" "$LOG" 2> /dev/null || true; exit 0 ;;
+esac
+
+self_check
+exec 9> "$STATE_DIR/lock"
+flock -w 600 9 || die "another deploy is still running"
+
+case "$verb" in
+  list) cmd_list ;;
+  status) cmd_status "${1:-}" ;;
+  plan) [ $# -eq 1 ] || die "usage: plan <stack>"; cmd_plan "$1" ;;
+  deploy) [ $# -ge 1 ] || die "usage: deploy <stack> [--pull] [--recreate]"; cmd_deploy "$@" ;;
+  rollback) [ $# -eq 1 ] || die "usage: rollback <stack>"; cmd_rollback "$1" ;;
+  retire) [ $# -eq 1 ] || die "usage: retire <stack>"; cmd_retire "$1" ;;
+  *) usage >&2; exit 2 ;;
+esac

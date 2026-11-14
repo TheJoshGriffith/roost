@@ -30,6 +30,7 @@
 - **A shared Chromium** that agents drive through the `browser` MCP (Playwright over CDP). You watch and take over through VNC in the browser, for CAPTCHAs, logins and the like.
 - **SSH** (key only) for terminal clients and the desktop app's SSH connections.
 - **No Docker socket, no `--privileged`.** If an agent wrecks the container, you recreate it. See [docs/sandboxing.md](docs/sandboxing.md).
+- **Optional, limited access to the host's Docker.** A filtered proxy for status, logs and restarts, and a gate that deploys Compose stacks only from a branch you review. Neither gives the agents root on the host. See [docs/host-access.md](docs/host-access.md).
 
 Everything sits behind one port (`7680`) and one login.
 

@@ -81,6 +81,16 @@ RUN cd /tmp \
  && rm -rf /tmp/* \
  && gh --version | head -1 && glab --version | head -1
 
+# Docker CLI only, no daemon. It does nothing unless you point DOCKER_HOST at
+# something, such as the filtered socket proxy in docs/host-access.md.
+RUN install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+ && echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" > /etc/apt/sources.list.d/docker.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends docker-ce-cli \
+ && rm -rf /var/lib/apt/lists/* \
+ && docker --version
+
 # The agents themselves, plus the MCP bridge that lets them drive the shared browser.
 RUN npm install -g --omit=dev \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \

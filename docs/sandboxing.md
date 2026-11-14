@@ -6,7 +6,7 @@ roost assumes the agents inside it might do something dumb: delete files, instal
 
 | | |
 | --- | --- |
-| **No Docker socket** | Agents can't see, start or stop your other containers. |
+| **No Docker socket** | Agents can't see, start or stop your other containers. If you want them to, [host-access.md](host-access.md) adds a filtered proxy and a reviewed-deploy gate that stop short of the socket. |
 | **No `--privileged`, no extra capabilities** | It runs with Docker's default capability set and seccomp profile, so it can't mount host disks, load kernel modules or reach host devices. |
 | **No host network** | It sits on the bridge network with its own IP and ports. |
 | **Only two mounts** | `/config` (its own appdata) and `/workspace` (the share you chose). Nothing else from the host is visible. |
@@ -16,6 +16,8 @@ roost assumes the agents inside it might do something dumb: delete files, instal
 **Why not Docker-in-Docker?** DinD needs `--privileged`, and a privileged container can trivially take over the host. Giving an agent a DinD daemon is about as dangerous as giving it the host's Docker socket. If agents need Docker, the safe pattern is a small **VM** with its own Docker engine, with `DOCKER_HOST=tcp://<vm>:2376` (TLS) set in roost. The VM boundary is a real wall, and you can snapshot it and reset it. This is on the roadmap.
 
 ## What it doesn't protect against
+
+- **Host access you add.** With the [socket proxy](host-access.md#tier-1-the-socket-proxy), agents can stop and restart any container and read every container's environment variables. With the [deploy gate](host-access.md#tier-2-the-deploy-gate), they can deploy whatever you merge into your stacks repository. Neither one gives them root on the host, but both reach your production services.
 
 - **Your workspace.** Agents can read, change and delete anything under `/workspace`. Keep it under git, and keep backups of anything you care about. Don't map shares the agents don't need.
 - **Your network.** The container can reach anything the host's LAN can reach, including other services on Harris by IP and your router's admin page. It also can't tell a legitimate request from a prompt-injected one. If that matters, put roost on its own VLAN or Docker network and restrict its traffic with firewall rules. Network policy isn't built in yet.
