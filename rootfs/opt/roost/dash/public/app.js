@@ -156,13 +156,29 @@ async function loadHistory(entry) {
   connect(entry, entry.key, opened);
 }
 
-async function sendMessage(text) {
+// Upload attachments one by one (raw body, name in the query); returns their ids.
+async function uploadFiles(files) {
+  const ids = [];
+  for (const [i, f] of files.entries()) {
+    if (files.length > 1 || f.size > 2e6) toast(`Uploading ${files.length > 1 ? `${i + 1} of ${files.length}: ` : ''}${f.name}\u2026`);
+    const r = await api('POST', 'api/uploads?name=' + encodeURIComponent(f.name), f, true);
+    ids.push(r.id);
+  }
+  return ids;
+}
+
+// `files` are new File objects to upload; `ids` are attachments already uploaded (a retry).
+async function sendMessage(text, files, ids) {
   const key = App.view.current;
   const entry = App.chats.get(key);
-  if (!entry) return;
+  if (!entry) return false;
   const st = entry.state;
   const draft = App.drafts.get(key);
-  const body = { tool: toolOf(key), text, model: st.model || undefined, mode: st.mode || undefined };
+  let attachments = ids && ids.length ? ids : undefined;
+  if (files && files.length) {
+    try { attachments = await uploadFiles(files); } catch (e) { toast(`Couldn\u2019t upload: ${e.message}`); return false; }
+  }
+  const body = { tool: toolOf(key), text, attachments, model: st.model || undefined, mode: st.mode || undefined };
   if (draft && isDraftKey(entry.key)) Object.assign(body, { project: draft.projectId, dir: draft.chat.cwd });
   else body.key = entry.key;
   ingest(entry, { t: 'status', status: 'starting' });
@@ -178,10 +194,7 @@ async function sendMessage(text) {
 const liveKey = (entry) => entry.streamKey || entry.key;
 
 const chatView = createChatView($('#chat-pane'), {
-  onSend: (text, files) => {
-    if (files && files.length) toast('Attachments aren’t supported yet; put files in the project with Files.');
-    if (text) sendMessage(text);
-  },
+  onSend: (text, files) => sendMessage(text, files),
   onStop: () => { const e = App.chats.get(App.view.current); if (e) api('POST', 'api/live/interrupt', { key: liveKey(e) }).catch((x) => toast(x.message)); },
   onDecide: (id, decision, reason) => {
     const e = App.chats.get(App.view.current);
@@ -206,7 +219,7 @@ const chatView = createChatView($('#chat-pane'), {
   onRetry: () => {
     const e = App.chats.get(App.view.current);
     const last = e && [...e.state.items].reverse().find((i) => i.kind === 'user');
-    if (last) sendMessage(last.text); else toast('Nothing to retry');
+    if (last) sendMessage(last.text, null, (last.attachments || []).filter((a) => a.id && !a.missing).map((a) => a.id)); else toast('Nothing to retry');
   },
 });
 

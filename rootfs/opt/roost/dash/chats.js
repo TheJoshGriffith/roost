@@ -7,6 +7,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const readline = require('readline');
+const uploads = require('./uploads');
 
 const HOME = process.env.HOME || '/config/home';
 const CLAUDE_DIR = path.join(HOME, '.claude', 'projects');
@@ -22,6 +23,12 @@ const clip = (s, n) => {
 };
 
 // Text a human typed, or null for tool results, system reminders, slash-command plumbing etc.
+// A first prompt for the chat title, without roost's attachment note.
+function promptTitle(t) {
+  const { text, attachments } = uploads.split(t);
+  return text || (attachments && attachments.length ? attachments.map((a) => a.name).join(', ') : t);
+}
+
 function humanText(content) {
   let text = null;
   if (typeof content === 'string') text = content;
@@ -79,7 +86,7 @@ async function parseClaude(file, st) {
         const t = humanText(d.message && d.message.content);
         if (t) {
           chat.prompts++;
-          if (!chat.firstPrompt) chat.firstPrompt = clip(t, 200);
+          if (!chat.firstPrompt) chat.firstPrompt = clip(promptTitle(t), 200);
         }
         break;
       }
@@ -127,7 +134,7 @@ async function parseCodex(file, st) {
       const t = humanText((p.content || []).filter((c) => c.type === 'input_text').map((c) => ({ type: 'text', text: c.text })));
       if (t) {
         chat.prompts++;
-        if (!chat.firstPrompt) chat.firstPrompt = clip(t, 200);
+        if (!chat.firstPrompt) chat.firstPrompt = clip(promptTitle(t), 200);
       }
     }
   });

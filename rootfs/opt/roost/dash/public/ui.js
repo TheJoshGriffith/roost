@@ -1041,12 +1041,21 @@ function renderPermission(item, opts = {}) {
  *   ctx  = {state, agent, cwd, projectName, isExpanded(id, def), onToggle(id), showAll(id),
  *           onShowAll(id), denyOpen(id), onDenyOpen(id, open), onDecide(id, d, reason), onRetry()}
  */
+// An attachment on a sent message: a thumbnail for pictures, a chip for other files.
+function renderAttachment(a) {
+  const title = `${a.name}${a.size ? ' \u00b7 ' + fmtBytes(a.size) : ''}${a.missing ? ' (no longer stored)' : ''}`;
+  if (a.image && a.url) return h('a', { class: 'att-img', href: a.url, target: '_blank', rel: 'noopener', title }, h('img', { src: a.url, alt: a.name, loading: 'lazy' }));
+  const kids = [icon('file', 13), h('span', null, a.name)];
+  return a.url ? h('a', { class: 'att', href: a.url, title, download: a.name }, kids) : h('span', { class: 'att' + (a.missing ? ' is-missing' : ''), title }, kids);
+}
+function fmtBytes(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+
 function renderMessage(item, ctx) {
   let el = null;
   switch (item.kind) {
     case 'user':
       el = h('div', { class: 'ev ev-user' }, h('div', { class: 'bubble' }, item.text),
-        item.attachments && item.attachments.length ? h('div', { class: 'att-row' }, item.attachments.map((a) => h('span', { class: 'att' }, icon('file', 13), h('span', null, a.name)))) : null);
+        item.attachments && item.attachments.length ? h('div', { class: 'att-row' }, item.attachments.map(renderAttachment)) : null);
       break;
     case 'assistant':
       el = h('div', { class: 'ev ev-assistant', 'aria-busy': item.streaming ? 'true' : null }, renderMarkdown(item.text, { streaming: item.streaming }));
@@ -1109,7 +1118,7 @@ const MODELS = {
   codex: [{ v: '', label: 'Default model' }],
 };
 // Features the backend doesn't support yet stay out of the UI.
-const FEATURES = { attachments: false };
+const FEATURES = { attachments: true };
 // A permission request names the exact tool call it's for (toolId); older events
 // without one fall back to matching by tool name.
 const permFor = (req, tool) => (req.toolId ? req.toolId === tool.id : req.name === tool.name);
@@ -1266,8 +1275,22 @@ function createChatView(pane, handlers) {
     const fileIn = h('input', { type: 'file', multiple: true, hidden: true });
     const chips = h('div', { class: 'attach-list' });
     files = [];
-    const renderChips = () => chips.replaceChildren(...files.map((f, k) => h('span', { class: 'att' }, icon('file', 13), h('span', null, f.name), h('button', { type: 'button', 'aria-label': 'Remove ' + f.name, onclick: () => { files.splice(k, 1); renderChips(); syncComposer(); } }, icon('x', 13)))));
-    fileIn.addEventListener('change', () => { files.push(...fileIn.files); fileIn.value = ''; renderChips(); syncComposer(); });
+    const previews = new Map(); // File -> object URL for its thumbnail
+    const thumb = (f) => { if (!previews.has(f)) previews.set(f, URL.createObjectURL(f)); return previews.get(f); };
+    const renderChips = () => {
+      for (const [f, u] of previews) if (!files.includes(f)) { URL.revokeObjectURL(u); previews.delete(f); }
+      chips.replaceChildren(...files.map((f, k) => h('span', { class: 'att' + (/^image\//.test(f.type) ? ' has-thumb' : ''), title: `${f.name} \u00b7 ${fmtBytes(f.size)}` },
+        /^image\//.test(f.type) ? h('img', { src: thumb(f), alt: '' }) : icon('file', 13), h('span', null, f.name),
+        h('button', { type: 'button', 'aria-label': 'Remove ' + f.name, onclick: () => { files.splice(k, 1); renderChips(); syncComposer(); } }, icon('x', 13)))));
+    };
+    const addFiles = (list) => {
+      const add = [...list].filter((f) => f && f.size > 0);
+      if (!add.length) return;
+      // Pasted screenshots all arrive as "image.png"; give them distinct names.
+      files.push(...add.map((f, i) => (f.name && f.name !== 'image.png') ? f : new File([f], `pasted-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}${add.length > 1 ? '-' + (i + 1) : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type })));
+      renderChips(); syncComposer();
+    };
+    fileIn.addEventListener('change', () => { addFiles(fileIn.files); fileIn.value = ''; });
     const model = pick('Model', MODELS[meta.tool], st.model || MODELS[meta.tool][0].v, (v) => { st.model = v; handlers.onModel(v); });
     const mode = pick('Permission mode', MODES[meta.tool], st.mode || MODES[meta.tool][0].v, (v) => { st.mode = v; handlers.onMode(v); syncComposer(); }, true);
     const send = h('button', { type: 'submit', class: 'send' });
@@ -1276,16 +1299,28 @@ function createChatView(pane, handlers) {
     const warn = h('p', { class: 'mode-warn', hidden: true }, icon('alert', 14), h('span'));
     const form = h('form', { class: 'composer' }, chips, ta,
       h('div', { class: 'composer-bar' },
-        FEATURES.attachments ? h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Attach files', title: 'Attach files', onclick: () => fileIn.click() }, icon('paperclip', 18)) : null, fileIn,
+        FEATURES.attachments ? h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Attach files or pictures', title: 'Attach files or pictures (or paste / drop them here)', onclick: () => fileIn.click() }, icon('paperclip', 18)) : null, fileIn,
         model.el, mode.el, h('span', { class: 'spacer' }), hint, send));
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       if (BUSY.has(st.status)) { handlers.onStop(); return; }
       const text = ta.value.trim();
       if (!text && !files.length) return;
-      handlers.onSend(text, files.map((f) => ({ name: f.name, size: f.size, type: f.type })));
+      const sent = files;
+      const r = handlers.onSend(text, sent);
       ta.value = ''; drafts.set(meta.key, ''); files = []; renderChips(); autosize(); syncComposer();
+      // If the upload fails, put the message and its files back.
+      if (r && r.then) r.then((ok) => { if (ok === false && !ta.value && !files.length) { ta.value = text; files = sent; renderChips(); autosize(); syncComposer(); } });
     });
+    if (FEATURES.attachments) {
+      ta.addEventListener('paste', (e) => {
+        const list = [...(e.clipboardData && e.clipboardData.files || [])];
+        if (list.length) { e.preventDefault(); addFiles(list); }
+      });
+      form.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); form.classList.add('is-drop'); } });
+      form.addEventListener('dragleave', (e) => { if (!form.contains(e.relatedTarget)) form.classList.remove('is-drop'); });
+      form.addEventListener('drop', (e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); form.classList.remove('is-drop'); addFiles(e.dataTransfer.files); ta.focus(); });
+    }
     const coarse = matchMedia('(pointer: coarse)').matches;
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !coarse) {

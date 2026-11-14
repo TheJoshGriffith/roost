@@ -113,6 +113,15 @@ The **Secrets** tab gives the agents what they need to work with your repositori
 
 New chats, terminals and SSH sessions pick up changes immediately. Running chats, the Remote Control server and VS Code need a restart; the page has a button for Remote Control. Values are stored in roost's home directory (`/config/home/.config/roost/`, mode 600) and are never sent back to the browser. Agents can read anything they're able to use, though, so use narrowly scoped tokens. See [docs/sandboxing.md](docs/sandboxing.md).
 
+### Attachments in chats
+
+roost's chat box takes files and pictures. Attach them with the paperclip, paste them (e.g. a screenshot), or drop them on the message box. On a phone the paperclip offers the camera and photo library.
+
+- **Pictures** (PNG, JPEG, GIF, WebP, up to 3.75 MB) go to the model directly, so Claude and Codex can see them. Other picture formats, such as HEIC, are passed as files.
+- **Every file**, pictures included, is saved under `~/.local/share/roost/uploads/<date>/` and listed by path under your message. The agent can open it with its own tools (PDFs, logs, CSVs, archives…) or copy it into the project. Claude may read that folder without asking. Codex asks before running a command, as usual, unless you've chosen a more permissive mode.
+- Attachments show up as thumbnails and chips in the chat, including when you reopen it later.
+- Uploads are kept for 30 days (`ROOST_UPLOAD_KEEP_DAYS`). Files are limited to 100 MB each (`ROOST_UPLOAD_MAX_MB`).
+
 ### Plan usage
 
 The **Overview** shows how much of your plan's usage windows you've used: for Claude the 5-hour and 7-day windows, plus any per-model weekly limit; for Codex, whatever windows its plan has. Each bar has a tick showing how much of the window has gone by, so a bar past its tick is running ahead of the allowance. The numbers cover the whole account, not just roost. They come from the same sources as Claude Code's `/usage` screen and Codex's rate-limit status, using roost's existing sign-ins. The Claude source is undocumented and may change. roost only reads Claude's sign-in token, never refreshes it; if the token has expired, the card says so until Claude next runs and renews it.
@@ -154,6 +163,8 @@ The watchdog picks up changes within about 15 seconds. The Projects view's Edit 
 | `ROOST_CLAUDE_RC_ARGS` | | Extra flags for `claude remote-control` |
 | `ROOST_SCREEN` | `1600x900x24` | Virtual display size |
 | `ROOST_VNC_PASSWORD` | | Also listen on `:5900` for native VNC clients |
+| `ROOST_UPLOAD_MAX_MB` | `100` | Largest file you can attach in a chat |
+| `ROOST_UPLOAD_KEEP_DAYS` | `30` | How long chat attachments are kept (`0` keeps them forever) |
 | `ROOST_PREVIEW_PORTS` | `7700-7704` | Ports for showing web servers in the viewer (a range and/or a comma list). `off` turns previews off |
 | `ROOST_BROWSER_FLAGS` | | Extra Chromium flags |
 | `ROOST_SSH`, `ROOST_BROWSER`, `ROOST_CODE_SERVER`, `ROOST_FILES`, `ROOST_CLAUDE_RC` | `true` | Turn components off |

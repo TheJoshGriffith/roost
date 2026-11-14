@@ -12,6 +12,7 @@ const live = require('./live');
 const secrets = require('./secrets');
 const previews = require('./previews');
 const usage = require('./usage');
+const uploads = require('./uploads');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
@@ -177,6 +178,7 @@ const server = http.createServer(async (req, res) => {
     let m;
     if (req.method === 'GET' && p === '/api/projects') return send(res, 200, { ...(await projects.tree()), live: live.list() });
     if (req.method === 'GET' && p === '/api/live') return send(res, 200, { sessions: live.list() });
+    if (req.method === 'GET' && (m = p.match(/^\/api\/uploads\/(\d{4}-\d{2}-\d{2})\/([^/]+)$/))) return uploads.serve(res, `${m[1]}/${decodeURIComponent(m[2])}`);
     if (req.method === 'GET' && p === '/api/usage') return send(res, 200, await usage.all(url.searchParams.get('refresh') === '1'));
     if (req.method === 'GET' && p === '/api/previews') return send(res, 200, previews.list(), undefined, { 'Set-Cookie': previews.cookieHeader() });
     if (req.method === 'GET' && p === '/api/secrets') return send(res, 200, await secrets.list());
@@ -205,6 +207,8 @@ const server = http.createServer(async (req, res) => {
       // A custom header can't be sent cross-origin without a CORS preflight we never
       // answer, so this blocks other sites from driving these endpoints via the browser.
       if (req.headers['x-roost'] !== '1') return send(res, 403, { error: 'missing X-Roost header' });
+      // An attachment for a chat: the raw file is the request body, its name is in ?name=.
+      if (req.method === 'POST' && p === '/api/uploads') return send(res, 201, await uploads.save(req, url.searchParams.get('name') || 'file'));
       if (req.method === 'POST' && p === '/api/previews') return send(res, 200, previews.assign((await readJsonBody(req)).port), undefined, { 'Set-Cookie': previews.cookieHeader() });
       if (req.method === 'DELETE' && (m = p.match(/^\/api\/previews\/(\d+)$/))) { previews.release(m[1]); return send(res, 200, { ok: true }); }
       if (req.method === 'POST' && p === '/api/projects') return send(res, 201, await projects.create(await readJsonBody(req)));
@@ -242,7 +246,7 @@ const server = http.createServer(async (req, res) => {
         if (action === 'send') {
           let cwd;
           if (!b.key || b.key.split(':')[1].startsWith('new-')) cwd = await projects.resolveCwd(b.project, b.dir);
-          return send(res, 200, await live.send({ key: b.key, tool: b.tool, cwd, text: b.text, model: b.model, mode: b.mode }));
+          return send(res, 200, await live.send({ key: b.key, tool: b.tool, cwd, text: b.text, model: b.model, mode: b.mode, attachments: b.attachments }));
         }
         const s = live.get(String(b.key || ''));
         if (action === 'interrupt') { await s.interrupt(); return send(res, 200, { ok: true }); }
