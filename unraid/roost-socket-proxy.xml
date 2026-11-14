@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>roost-socket-proxy</Name>
+  <Repository>lscr.io/linuxserver/socket-proxy:latest</Repository>
+  <Registry>https://github.com/linuxserver/docker-socket-proxy/pkgs/container/socket-proxy</Registry>
+  <Network>roost-ops</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/TheJoshGriffith/roost/blob/main/docs/host-access.md</Support>
+  <Project>https://github.com/linuxserver/docker-socket-proxy</Project>
+  <Overview>A filtered, read-mostly view of this server's Docker for roost: list and inspect containers and images, read logs, and start, stop and restart containers. It can't create containers, exec into them, delete anything or change images, so roost can't use it to take over the host. Put it and roost on their own Docker network (roost-ops) and publish no ports. See roost's docs/host-access.md.</Overview>
+  <Category>Tools:</Category>
+  <TemplateURL>https://raw.githubusercontent.com/TheJoshGriffith/roost/main/unraid/roost-socket-proxy.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/TheJoshGriffith/roost/main/rootfs/opt/roost/dash/public/icon.svg</Icon>
+  <ExtraParams>--hostname=roost-socket-proxy --read-only --tmpfs /run --memory=128m --pids-limit=256</ExtraParams>
+  <PostArgs/>
+  <Requires>Create the network first, in the Unraid terminal: docker network create roost-ops. Then set roost's Network Type to roost-ops too, and in roost's Secrets page add DOCKER_HOST = tcp://roost-socket-proxy:2375. Don't publish a port and don't add other containers to roost-ops: anything that can reach this proxy gets the access below.</Requires>
+  <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="The host's Docker socket. The proxy is the only thing that touches it." Type="Path" Display="advanced" Required="true" Mask="false">/var/run/docker.sock</Config>
+  <Config Name="POST" Target="POST" Default="0" Mode="" Description="Keep 0. 1 allows creating containers, which is full control of the host." Type="Variable" Display="advanced" Required="true" Mask="false">0</Config>
+  <Config Name="Containers (read)" Target="CONTAINERS" Default="1" Mode="" Description="List and inspect containers. Note: inspect shows each container's environment variables." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Logs" Target="ALLOW_LOGS" Default="1" Mode="" Description="Read container logs." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Restart / stop / kill" Target="ALLOW_RESTARTS" Default="1" Mode="" Description="Restart, stop and kill containers (works with POST=0)." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Start" Target="ALLOW_START" Default="1" Mode="" Description="Start stopped containers (works with POST=0)." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Images (read)" Target="IMAGES" Default="1" Mode="" Description="List and inspect images (versions, digests)." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Networks (read)" Target="NETWORKS" Default="1" Mode="" Description="List and inspect networks." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Info" Target="INFO" Default="1" Mode="" Description="docker info: engine version, storage driver, counts." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="Events" Target="EVENTS" Default="1" Mode="" Description="docker events (what started, stopped, died)." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Exec" Target="EXEC" Default="0" Mode="" Description="Keep 0. Exec is a shell in any container, including ones with host mounts." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Archive" Target="ALLOW_ARCHIVE" Default="0" Mode="" Description="Keep 0. Copies files out of (and into) containers." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Export" Target="ALLOW_EXPORT" Default="0" Mode="" Description="Keep 0. Exports a container's whole filesystem." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Volumes" Target="VOLUMES" Default="0" Mode="" Description="List volumes. Harmless read-only, but rarely needed." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Timezone" Target="TZ" Default="Europe/London" Mode="" Description="Container timezone." Type="Variable" Display="advanced" Required="false" Mask="false">Europe/London</Config>
+</Container>

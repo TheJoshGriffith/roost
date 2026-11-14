@@ -1,0 +1,27 @@
+# deploy.conf for roost-deploy-gate. Copy to deploy.conf next to the script.
+# It's sourced as root, so keep it root-owned and outside anything roost mounts.
+
+# Where your stacks repo is cloned (with read-only credentials: a deploy key or
+# a read-only deploy token). Only origin/$BRANCH is ever deployed.
+#REPO_DIR="/mnt/user/appdata/roost-deploy/repo"
+#BRANCH="main"
+#STACKS_DIR="stacks"
+
+# Bind mounts must sit under one of these (space-separated). Keep it to app
+# data. /boot, /mnt/user as a whole, /etc, /root and the like make the policy
+# check meaningless.
+#ALLOWED_BIND_PREFIXES="/mnt/user/appdata/"
+
+# cap_add values to accept, e.g. for a VPN container: "NET_ADMIN"
+#ALLOWED_CAPS=""
+
+# 1 to accept `devices:` (GPU transcoding, USB radios...)
+#ALLOW_DEVICES=0
+
+# Require origin/$BRANCH to be signed by you. The strongest guarantee that what
+# gets deployed is what you reviewed, even if a token roost holds could push to
+# $BRANCH. Format: one "you@example.com ssh-ed25519 AAAA..." line per signer.
+#ALLOWED_SIGNERS="/mnt/user/appdata/roost-deploy/allowed_signers"
+
+# roost's container name. The gate refuses to run if roost can see its files.
+#ROOST_CONTAINER="roost"

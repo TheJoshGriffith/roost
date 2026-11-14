@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# roost-deploy <verb> [args]: ask the host's deploy gate to deploy a reviewed stack.
+# The host only accepts a fixed set of verbs (roost-deploy help lists them);
+# see docs/host-access.md. ROOST_DEPLOY_HOST (e.g. root@192.168.1.10) comes
+# from the Secrets page, and the SSH key for that host is restricted on the
+# host side to running the gate.
+set -euo pipefail
+if [ -z "${ROOST_DEPLOY_HOST:-}" ]; then
+  echo "roost-deploy isn't set up: add ROOST_DEPLOY_HOST (user@host) on the Secrets page." >&2
+  echo "See docs/host-access.md in the roost repository." >&2
+  exit 2
+fi
+exec ssh -o BatchMode=yes -o ConnectTimeout=10 -T "$ROOST_DEPLOY_HOST" -- "${@:-help}"
