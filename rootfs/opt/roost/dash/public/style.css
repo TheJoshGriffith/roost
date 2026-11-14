@@ -968,3 +968,14 @@ body[data-viewer="float"].vw-dragging .vw-head { cursor: grabbing; }
 .us-msg .i { margin-top: 3px; }
 .us-extra { font-size: 13px; color: var(--text-2); }
 .us-refresh { font-size: 12px; padding: 0; }
+
+/* ---------------------------------------------------------------- chat attachments */
+.att { text-decoration: none; }
+a.att:hover { border-color: var(--line-2); color: var(--text); }
+.att.is-missing { opacity: .6; text-decoration: line-through; }
+.att.has-thumb { padding-left: 3px; }
+.att.has-thumb img { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; flex: none; }
+.att-img { display: block; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--panel-2); line-height: 0; }
+.att-img img { display: block; max-width: min(260px, 60vw); max-height: 200px; object-fit: contain; }
+.att-img:hover { border-color: var(--line-2); }
+.composer.is-drop { border-color: var(--accent); border-style: dashed; background: var(--accent-soft); }
