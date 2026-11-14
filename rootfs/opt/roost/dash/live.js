@@ -5,7 +5,7 @@
 //
 //   status      { status }                      idle | starting | thinking | responding | tool | waiting | error | closed
 //   session     { key, id, model, mode }        a new chat got its real id
-//   user        { text }
+//   user        { text, attachments }        attachments: [{ id, name, size, type, image, url }]
 //   delta       { text }                        streaming assistant text
 //   text        { text }                        a finished assistant text block
 //   reasoning   { text }                        thinking / reasoning summary (may be empty)
@@ -26,6 +26,7 @@ const readline = require('readline');
 const { spawn } = require('child_process');
 const chats = require('./chats');
 const secrets = require('./secrets');
+const uploads = require('./uploads');
 
 // Secrets are read at the start of each agent process, so edits apply to new chats.
 const agentEnv = () => ({ ...process.env, ...secrets.env() });
@@ -161,6 +162,8 @@ class ClaudeSession extends LiveSession {
         // CLAUDE.md files and MCP servers (e.g. roost's shared browser).
         systemPrompt: { type: 'preset', preset: 'claude_code' },
         settingSources: ['user', 'project', 'local'],
+        // Attached files are saved here; let Claude read them like files in the project.
+        additionalDirectories: [uploads.ROOT],
         abortController: run.abort,
         stderr: (d) => { stderr.push(String(d)); if (stderr.length > 50) stderr.shift(); },
         canUseTool: (name, toolInput, opts) => this.askPermission(name, toolInput, opts),
@@ -190,12 +193,13 @@ class ClaudeSession extends LiveSession {
 
   get running() { return !!(this.run && this.run.q && !this.run.ended); }
 
-  send(text) {
+  send(text, atts = []) {
     this.touch();
     this.turnStarted = this.turnStarted || Date.now();
-    this.emit({ t: 'user', text });
+    this.emit({ t: 'user', text, attachments: atts.length ? atts.map(uploads.publicView) : undefined });
     this.setStatus('thinking');
-    this.run.queue.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: this.id || '' });
+    const content = uploads.claudeContent(text, atts);
+    this.run.queue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: this.id || '' });
     if (this.run.wake) this.run.wake();
   }
 
@@ -504,12 +508,12 @@ class CodexSession extends LiveSession {
     this.write({ id: m.id, error: { code: -32601, message: `roost does not support ${m.method}` } });
   }
 
-  send(text) {
+  send(text, atts = []) {
     this.touch();
     this.turnStarted = Date.now();
-    this.emit({ t: 'user', text });
+    this.emit({ t: 'user', text, attachments: atts.length ? atts.map(uploads.publicView) : undefined });
     this.setStatus('thinking');
-    this.call('turn/start', { threadId: this.id, input: [{ type: 'text', text, text_elements: [] }] }).catch((e) => {
+    this.call('turn/start', { threadId: this.id, input: uploads.codexInput(text, atts) }).catch((e) => {
       this.emit({ t: 'notice', level: 'error', text: `Couldn't start the turn: ${e.message}` });
       this.setStatus('error');
     });
@@ -542,6 +546,12 @@ class CodexSession extends LiveSession {
 }
 
 // ------------------------------------------------------------------ history (from transcripts)
+// A user message from a transcript, with roost's attachment note turned back into attachments.
+function userEvent(text, at) {
+  const { text: t, attachments } = uploads.split(text);
+  return { t: 'user', text: t, attachments: attachments || undefined, at };
+}
+
 async function history(key, limit = 600) {
   const [tool] = key.split(':');
   await chats.scan();
@@ -562,7 +572,7 @@ async function history(key, limit = 600) {
           for (const b of c) if (b.type === 'tool_result') push(claudeToolResult(b, d.toolUseResult));
         } else if (!d.isMeta && !d.isCompactSummary) {
           const t = chats.humanText(c);
-          if (t) push({ t: 'user', text: t, at: Date.parse(d.timestamp) || null });
+          if (t) push(userEvent(t, Date.parse(d.timestamp) || null));
         }
       } else if (Array.isArray(c)) {
         for (const b of c) {
@@ -574,8 +584,9 @@ async function history(key, limit = 600) {
       const p = d.payload || {};
       if (d.type !== 'response_item') continue;
       if (p.type === 'message' && (p.role === 'user' || p.role === 'assistant')) {
-        const text = (p.content || []).map((x) => x.text || '').join('\n');
-        if (p.role === 'user') { const t = chats.humanText(text); if (t) push({ t: 'user', text: t, at: Date.parse(d.timestamp) || null }); }
+        // Codex wraps attached pictures in "<image ...>" / "</image>" text items; they aren't the user's words.
+        const text = (p.content || []).filter((x) => !/^<\/?image\b/.test(x.text || '')).map((x) => x.text || '').join('\n');
+        if (p.role === 'user') { const t = chats.humanText(text); if (t) push(userEvent(t, Date.parse(d.timestamp) || null)); }
         else if (text) push({ t: 'text', text, at: Date.parse(d.timestamp) || null });
       } else if (p.type === 'function_call' || p.type === 'custom_tool_call') {
         let input = p.arguments || p.input;
@@ -618,8 +629,9 @@ async function ensure({ key, tool, cwd, model, mode }) {
   return s;
 }
 
-async function send({ key, tool, cwd, text, model, mode }) {
-  if (!text || !String(text).trim()) throw Object.assign(new Error('message is empty'), { status: 400 });
+async function send({ key, tool, cwd, text, model, mode, attachments }) {
+  const atts = uploads.resolve(attachments);
+  if ((!text || !String(text).trim()) && !atts.length) throw Object.assign(new Error('message is empty'), { status: 400 });
   tool = tool || (key && key.split(':')[0]);
   if (tool !== 'claude' && tool !== 'codex') throw Object.assign(new Error('tool must be claude or codex'), { status: 400 });
   if (!cwd && key) {
@@ -629,7 +641,7 @@ async function send({ key, tool, cwd, text, model, mode }) {
   }
   if (tool === 'claude' && cwd) await new Promise((r) => spawn('/usr/local/bin/roost-trust', [cwd]).on('exit', r).on('error', r));
   const s = await ensure({ key, tool, cwd, model, mode });
-  s.send(String(text));
+  s.send(String(text || '').trim(), atts);
   return { key: s.id ? `${tool}:${s.id}` : [...s.keys][0], pendingKey: [...s.keys][0] };
 }
 
