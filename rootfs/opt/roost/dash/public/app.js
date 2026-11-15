@@ -117,8 +117,9 @@ function rekey(entry, newKey) {
 }
 
 // Follow a chat's live event stream. `skipBefore` drops replayed events that the
-// transcript history already showed.
-function connect(entry, streamKey, skipBefore) {
+// transcript history already showed. `resume` reconnects a chat we stopped
+// following: the server replays what we missed (everything after entry.seq).
+function connect(entry, streamKey, skipBefore, resume) {
   if (entry.es && entry.streamKey === streamKey) return;
   if (entry.es) entry.es.close();
   entry.streamKey = streamKey;
@@ -129,8 +130,11 @@ function connect(entry, streamKey, skipBefore) {
     let ev;
     try { ev = JSON.parse(m.data); } catch { return; }
     if (ev.t === 'snapshot') {
+      const wasLive = entry.live;
       entry.live = !!ev.live;
       if (ev.live && entry.state.status !== ev.status) ingest(entry, { t: 'status', status: ev.status });
+      // The session ended while we weren't following it.
+      if (resume && !ev.live && wasLive) ingest(entry, { t: 'status', status: 'offline' });
       if (ev.model && !entry.state.model) entry.state.model = ev.model;
       if (ev.mode && !entry.state.mode) entry.state.mode = ev.mode;
       return;
@@ -141,8 +145,24 @@ function connect(entry, streamKey, skipBefore) {
   };
 }
 
+// Only the chat on screen keeps a live stream. Browsers allow 6 connections per
+// host over HTTP/1.1 (roost's web UI is plain HTTP), and each EventSource holds
+// one for good: with a stream per visited chat, a handful of chats used them
+// all up and every other request (sending a message, the Secrets page) queued
+// forever. Other chats' status comes from the /api/projects poll.
+function followOnly(keep) {
+  for (const e of App.chats.values()) {
+    if (e !== keep && e.es) { e.es.close(); e.es = null; }
+  }
+}
+
 async function loadHistory(entry) {
-  if (entry.loaded || isDraftKey(entry.key)) { entry.loaded = true; return; }
+  if (entry.loaded || isDraftKey(entry.key)) {
+    entry.loaded = true;
+    // Seen before: pick its stream back up where we left off.
+    if (entry.streamKey) connect(entry, entry.streamKey, 0, true);
+    return;
+  }
   entry.loaded = true;
   const opened = Date.now();
   try {
@@ -184,7 +204,9 @@ async function sendMessage(text, files, ids) {
   ingest(entry, { t: 'status', status: 'starting' });
   try {
     const r = await api('POST', 'api/live/send', body);
-    connect(entry, r.pendingKey || r.key, 0);
+    // Moved to another chat meanwhile: remember the stream, connect on return.
+    if (App.chats.get(App.view.current) === entry) connect(entry, r.pendingKey || r.key, 0);
+    else entry.streamKey = r.pendingKey || r.key;
   } catch (e) {
     ingest(entry, { t: 'notice', level: 'error', text: e.message });
     ingest(entry, { t: 'status', status: 'error' });
@@ -502,7 +524,7 @@ function onRoute() {
     if (!isDraftKey(key)) { App.lastChat = key; store.set('roost.lastChat', key); }
   } else {
     document.body.dataset.chatOpen = 'false';
-    if (route === 'projects' && mqDesk.matches && App.view.current) { App.view.current = null; chatView.show(null); }
+    if (route === 'projects' && mqDesk.matches && App.view.current) { App.view.current = null; chatView.show(null); followOnly(null); }
   }
   if (route === 'overview') { renderOv(); if (!App.usageAt || Date.now() - App.usageAt > 60000) refreshUsage(); }
   if (route === 'secrets') { Secrets.render(); Secrets.refresh(); }
@@ -513,6 +535,7 @@ function openChatView(key) {
   App.view.current = key;
   const ctx = chatContext(key);
   const entry = entryFor(key);
+  followOnly(entry);
   const c = ctx ? ctx.c : { tool: toolOf(key), title: 'Chat', cwd: '', branch: null };
   entry.state.meta = { ...entry.state.meta, key, tool: c.tool };
   App.view.currentTitle = c.title;
