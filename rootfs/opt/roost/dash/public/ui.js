@@ -637,7 +637,7 @@ function applyEvent(st, ev, now = Date.now()) {
     case 'session':
       st.sessionId = ev.id; st.model = ev.model ?? st.model; st.mode = ev.mode ?? st.mode; chrome = true;
       break;
-    case 'user': add({ kind: 'user', text: ev.text || '', attachments: ev.attachments }); break;
+    case 'user': add({ kind: 'user', text: ev.text || '', attachments: ev.attachments, queued: !!ev.queued }); break;
     case 'delta': {
       let it = st.streaming.get(parent);
       if (!it) { it = add({ kind: 'assistant', text: '', streaming: true }); st.streaming.set(parent, it); }
@@ -1055,7 +1055,8 @@ function renderMessage(item, ctx) {
   switch (item.kind) {
     case 'user':
       el = h('div', { class: 'ev ev-user' }, h('div', { class: 'bubble' }, item.text),
-        item.attachments && item.attachments.length ? h('div', { class: 'att-row' }, item.attachments.map(renderAttachment)) : null);
+        item.attachments && item.attachments.length ? h('div', { class: 'att-row' }, item.attachments.map(renderAttachment)) : null,
+        item.queued ? h('span', { class: 'ev-note', title: 'Sent while the agent was working: it reads this at its next step' }, 'Sent mid-turn') : null);
       break;
     case 'assistant':
       el = h('div', { class: 'ev ev-assistant', 'aria-busy': item.streaming ? 'true' : null }, renderMarkdown(item.text, { streaming: item.streaming }));
@@ -1294,18 +1295,18 @@ function createChatView(pane, handlers) {
     const model = pick('Model', MODELS[meta.tool], st.model || MODELS[meta.tool][0].v, (v) => { st.model = v; handlers.onModel(v); });
     const mode = pick('Permission mode', MODES[meta.tool], st.mode || MODES[meta.tool][0].v, (v) => { st.mode = v; handlers.onMode(v); syncComposer(); }, true);
     const send = h('button', { type: 'submit', class: 'send' });
+    const stop = h('button', { type: 'button', class: 'send is-stop', 'aria-label': 'Stop', title: 'Stop (Esc)', hidden: true, onclick: () => handlers.onStop() }, icon('stop', 14));
     const hint = h('span', { class: 'kbd-hint' });
     const banner = h('div', { class: 'approval-banner', hidden: true }, icon('shield', 15), h('span', null, `${agent} is waiting for your approval`), h('button', { type: 'button', class: 'link-btn', onclick: focusPermission }, 'Review'));
     const warn = h('p', { class: 'mode-warn', hidden: true }, icon('alert', 14), h('span'));
     const form = h('form', { class: 'composer' }, chips, ta,
       h('div', { class: 'composer-bar' },
         FEATURES.attachments ? h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Attach files or pictures', title: 'Attach files or pictures (or paste / drop them here)', onclick: () => fileIn.click() }, icon('paperclip', 18)) : null, fileIn,
-        model.el, mode.el, h('span', { class: 'spacer' }), hint, send));
+        model.el, mode.el, h('span', { class: 'spacer' }), hint, stop, send));
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      if (BUSY.has(st.status)) { handlers.onStop(); return; }
       const text = ta.value.trim();
-      if (!text && !files.length) return;
+      if (!text && !files.length) { if (BUSY.has(st.status)) handlers.onStop(); return; }
       const sent = files;
       const r = handlers.onSend(text, sent);
       ta.value = ''; drafts.set(meta.key, ''); files = []; renderChips(); autosize(); syncComposer();
@@ -1325,12 +1326,12 @@ function createChatView(pane, handlers) {
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !coarse) {
         e.preventDefault();
-        if (BUSY.has(st.status)) { toast(`${agent} is still working. Press Esc or Stop to interrupt.`); return; }
+        if (!ta.value.trim() && !files.length) return; // Enter never stops; Esc or the Stop button does
         form.requestSubmit();
       } else if (e.key === 'Escape' && BUSY.has(st.status)) { e.preventDefault(); handlers.onStop(); }
     });
     ta.addEventListener('input', () => { drafts.set(meta.key, ta.value); autosize(); syncComposer(); });
-    return { el: h('div', { class: 'composer-wrap' }, banner, form, warn), ta, send, hint, banner, warn, form, model, mode };
+    return { el: h('div', { class: 'composer-wrap' }, banner, form, warn), ta, send, stop, hint, banner, warn, form, model, mode };
   }
   function autosize() { if (!R) return; const ta = R.ta; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, Math.max(120, window.innerHeight * .3)) + 'px'; }
   function focusPermission() {
@@ -1344,13 +1345,18 @@ function createChatView(pane, handlers) {
     const busy = BUSY.has(st.status);
     const agent = meta.tool === 'codex' ? 'Codex' : 'Claude';
     const offline = st.status === 'offline' || st.status === 'closed';
-    R.ta.placeholder = offline ? `Message ${agent} to resume this chat\u2026` : busy ? `${agent} is working\u2026` : `Message ${agent}\u2026`;
-    R.send.classList.toggle('is-stop', busy);
-    R.send.replaceChildren(icon(busy ? 'stop' : 'arrowUp', busy ? 14 : 19));
-    R.send.setAttribute('aria-label', busy ? 'Stop' : 'Send');
-    R.send.title = busy ? 'Stop (Esc)' : 'Send (Enter)';
-    R.send.disabled = !busy && !R.ta.value.trim() && !files.length;
-    R.hint.replaceChildren(...(busy ? [h('kbd', null, 'Esc'), ' to stop'] : [h('kbd', null, '\u21b5'), ' send \u00b7 ', h('kbd', null, '\u21e7\u21b5'), ' newline']));
+    // While the agent works, the button stops it; once you type, it sends (the message joins
+    // the running turn) and a separate Stop button appears beside it.
+    const typed = !!(R.ta.value.trim() || files.length);
+    const asStop = busy && !typed;
+    R.ta.placeholder = offline ? `Message ${agent} to resume this chat\u2026` : busy ? `${agent} is working\u2026 type to add to this turn` : `Message ${agent}\u2026`;
+    R.send.classList.toggle('is-stop', asStop);
+    R.send.replaceChildren(icon(asStop ? 'stop' : 'arrowUp', asStop ? 14 : 19));
+    R.send.setAttribute('aria-label', asStop ? 'Stop' : 'Send');
+    R.send.title = asStop ? 'Stop (Esc)' : busy ? `Send now: ${agent} reads it at its next step (Enter)` : 'Send (Enter)';
+    R.send.disabled = !busy && !typed;
+    R.stop.hidden = !(busy && typed);
+    R.hint.replaceChildren(...(busy ? (typed ? [h('kbd', null, '\u21b5'), ' send now \u00b7 ', h('kbd', null, 'Esc'), ' stop'] : [h('kbd', null, 'Esc'), ' to stop']) : [h('kbd', null, '\u21b5'), ' send \u00b7 ', h('kbd', null, '\u21e7\u21b5'), ' newline']));
     R.banner.hidden = !pendingPermissions(st).length;
     const m = MODES[meta.tool].find((x) => x.v === (st.mode || MODES[meta.tool][0].v));
     R.warn.hidden = !(m && m.danger);
