@@ -201,7 +201,9 @@ async function sendMessage(text, files, ids) {
   const body = { tool: toolOf(key), text, attachments, model: st.model || undefined, mode: st.mode || undefined };
   if (draft && isDraftKey(entry.key)) Object.assign(body, { project: draft.projectId, dir: draft.chat.cwd });
   else body.key = entry.key;
-  ingest(entry, { t: 'status', status: 'starting' });
+  // Sent mid-turn, the message joins the running turn: leave the status alone.
+  const midTurn = entry.live && BUSY.has(st.status);
+  if (!midTurn) ingest(entry, { t: 'status', status: 'starting' });
   try {
     const r = await api('POST', 'api/live/send', body);
     // Moved to another chat meanwhile: remember the stream, connect on return.
@@ -209,7 +211,7 @@ async function sendMessage(text, files, ids) {
     else entry.streamKey = r.pendingKey || r.key;
   } catch (e) {
     ingest(entry, { t: 'notice', level: 'error', text: e.message });
-    ingest(entry, { t: 'status', status: 'error' });
+    if (!midTurn) ingest(entry, { t: 'status', status: 'error' });
   }
 }
 

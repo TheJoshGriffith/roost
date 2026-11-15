@@ -37,6 +37,7 @@ const MAX_EVENTS = 3000;
 const IDLE_CLOSE_MS = 45 * 60 * 1000;
 const TEXT_LIMIT = 20000;
 
+const BUSY_STATUS = new Set(['starting', 'thinking', 'responding', 'tool', 'waiting']);
 const sessions = new Map(); // key -> LiveSession (a session may be registered under several keys)
 const watchers = new Map(); // key -> Set<res> (SSE connections)
 
@@ -127,6 +128,9 @@ class LiveSession {
   }
 
   touch() { this.lastActive = Date.now(); }
+
+  // Mid-turn: a message sent now joins the running turn instead of starting one.
+  get busy() { return BUSY_STATUS.has(this.status); }
 }
 
 // ------------------------------------------------------------------ Claude (Agent SDK)
@@ -193,11 +197,14 @@ class ClaudeSession extends LiveSession {
 
   get running() { return !!(this.run && this.run.q && !this.run.ended); }
 
+  // Sent mid-turn, Claude Code folds the message into the running turn at its next
+  // step (after the current tool call), like typing ahead in the CLI.
   send(text, atts = []) {
     this.touch();
     this.turnStarted = this.turnStarted || Date.now();
-    this.emit({ t: 'user', text, attachments: atts.length ? atts.map(uploads.publicView) : undefined });
-    this.setStatus('thinking');
+    const midTurn = this.busy && this.status !== 'starting';
+    this.emit({ t: 'user', text, attachments: atts.length ? atts.map(uploads.publicView) : undefined, queued: midTurn || undefined });
+    if (!midTurn) this.setStatus('thinking');
     const content = uploads.claudeContent(text, atts);
     this.run.queue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: this.id || '' });
     if (this.run.wake) this.run.wake();
@@ -348,6 +355,8 @@ class CodexSession extends LiveSession {
     this.rpcId = 0;
     this.calls = new Map();
     this.turnId = null;
+    this.turnStarting = false;
+    this.queued = []; // inputs waiting for the next turn
     const proc = spawn(CODEX_BIN, ['app-server'], { cwd: this.cwd, env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc = proc;
     this.ended = false;
@@ -437,9 +446,11 @@ class CodexSession extends LiveSession {
           tokens: u ? { input: u.inputTokens || 0, cached: u.cachedInputTokens || 0, output: (u.outputTokens || 0) + (u.reasoningOutputTokens || 0) } : null,
           error: t.status === 'failed' ? clip((t.error && (t.error.message || JSON.stringify(t.error))) || 'turn failed', 2000) : t.status === 'interrupted' ? 'Interrupted' : null,
         });
+        this.lastTurnDone = t.id || this.turnId;
         this.turnId = null;
         this.turnStarted = 0;
         this.setStatus('idle');
+        if (!this.turnStarting) this.flushQueued();
         break;
       }
       case 'error':
@@ -508,15 +519,47 @@ class CodexSession extends LiveSession {
     this.write({ id: m.id, error: { code: -32601, message: `roost does not support ${m.method}` } });
   }
 
+  // Mid-turn, the message steers the running turn (turn/steer), so Codex reads it at its
+  // next step. If the turn can't take it (it is just starting or ending, or is a review or
+  // compaction), it waits and starts the next turn.
   send(text, atts = []) {
     this.touch();
+    const input = uploads.codexInput(text, atts);
+    const midTurn = this.turnStarting || !!this.turnId;
+    this.emit({ t: 'user', text, attachments: atts.length ? atts.map(uploads.publicView) : undefined, queued: midTurn || undefined });
+    if (!midTurn) return this.startTurn(input);
+    if (this.turnStarting || !this.turnId) { this.queued.push(input); return; }
+    this.call('turn/steer', { threadId: this.id, expectedTurnId: this.turnId, input }).catch(() => {
+      if (this.turnId || this.turnStarting) this.queued.push(input); else this.startTurn(input);
+    });
+  }
+
+  startTurn(input) {
     this.turnStarted = Date.now();
-    this.emit({ t: 'user', text, attachments: atts.length ? atts.map(uploads.publicView) : undefined });
+    this.turnStarting = true;
     this.setStatus('thinking');
-    this.call('turn/start', { threadId: this.id, input: uploads.codexInput(text, atts) }).catch((e) => {
+    this.call('turn/start', { threadId: this.id, input }).then((r) => {
+      // turn/started may come before or after this reply; a turn that already finished stays finished.
+      if (r && r.turn && r.turn.id && r.turn.id !== this.lastTurnDone) this.turnId = this.turnId || r.turn.id;
+    }, (e) => {
       this.emit({ t: 'notice', level: 'error', text: `Couldn't start the turn: ${e.message}` });
       this.setStatus('error');
+    }).finally(() => {
+      this.turnStarting = false;
+      // Messages that arrived while the turn was starting: steer them in now.
+      const waiting = this.queued.splice(0);
+      if (!waiting.length) return;
+      if (this.turnId) {
+        for (const inp of waiting) {
+          this.call('turn/steer', { threadId: this.id, expectedTurnId: this.turnId, input: inp }).catch(() => this.queued.push(inp));
+        }
+      } else this.flushQueued(waiting);
     });
+  }
+
+  // The turn ended with messages still waiting: they become the next turn.
+  flushQueued(waiting = this.queued.splice(0)) {
+    if (waiting.length) this.startTurn(waiting.flat());
   }
 
   async interrupt() {
@@ -611,7 +654,8 @@ async function history(key, limit = 600) {
 // ------------------------------------------------------------------ manager
 async function ensure({ key, tool, cwd, model, mode }) {
   let s = key && sessions.get(key);
-  if (s && s.running && !s.restartOnNextSend) return s;
+  // A pending restart (a mode or model change) waits until the turn is over.
+  if (s && s.running && (!s.restartOnNextSend || s.busy)) return s;
   const id = key && !key.split(':')[1].startsWith('new-') ? key.split(':')[1] : null;
   if (s) { // restart an exited or reconfigured session in place, keeping its event history
     s.close();
