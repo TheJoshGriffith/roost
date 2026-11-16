@@ -34,6 +34,7 @@
       <section class="screen" id="scr-board" aria-label="Board">
         <div class="tb">
           <h1>Board</h1>
+          <div class="segt" role="group" aria-label="Group chats by"><button type="button" data-group="status" title="Group by state: needs you, working, finished, idle">Status</button><button type="button" data-group="project" title="One section per project">Projects</button></div>
           <div class="chips" id="chips"></div>
           <label class="filter"><span class="filter-ic"></span><span class="sr-only">Filter chats</span><input type="search" id="filter" placeholder="Filter chats" autocomplete="off" enterkeyhint="search"></label>
           <button class="toggle" id="archived-btn" type="button" aria-pressed="false"><span class="box"></span><span class="lbl">Archived</span><span class="n" id="archived-count"></span></button>
@@ -51,7 +52,7 @@
 
       <section class="screen" id="scr-chat" aria-label="Chat">
         <aside class="slist" aria-label="Sessions">
-          <div class="slist-h"><a class="ibtn" href="#/board" id="sl-board" title="Back to the board" aria-label="Back to the board"></a><label class="filter"><span class="filter-ic"></span><span class="sr-only">Filter sessions</span><input type="search" id="sl-filter" placeholder="Sessions" autocomplete="off"></label></div>
+          <div class="slist-h"><a class="ibtn" href="#/board" id="sl-board" title="Back to the board" aria-label="Back to the board"></a><label class="filter"><span class="filter-ic"></span><span class="sr-only">Filter sessions</span><input type="search" id="sl-filter" placeholder="Sessions" autocomplete="off"></label><div class="segt sm" role="group" aria-label="Group chats by"><button type="button" data-group="status" title="Group by state">State</button><button type="button" data-group="project" title="Group by project">Proj</button></div></div>
           <div class="slist-l" id="slist"></div>
         </aside>
         <section class="sc chat-pane" id="chat-pane" aria-label="Conversation"></section>

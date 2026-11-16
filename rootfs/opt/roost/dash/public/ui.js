@@ -1446,6 +1446,12 @@ function fmtClock(ms) {
 const clockEl = (since, cls) => since ? h('span', { class: cls || null, 'data-clock': since }, fmtClock(Date.now() - since)) : null;
 const projSw = (p) => h('i', { class: 'sw', style: `--c:${safeColor(p && p.color)}` });
 const projLabel = (p) => h('span', { class: 'proj', title: p ? p.name : '' }, projSw(p), h('span', null, p ? p.name : ''));
+// Inside a project section the project is known, so a row names its folder or worktree instead.
+const locLabel = (it) => {
+  const l = it.loc, path = (l && l.path) || it.cwd || '';
+  const name = path.replace(/\/+$/, '').split('/').pop() || path;
+  return h('span', { class: 'proj loc', title: path }, icon(l && l.kind === 'worktree' ? 'fork' : l && l.kind === 'repo' ? 'repo' : 'folder', 12), h('span', null, name));
+};
 const agentName = (tool) => (tool === 'codex' ? 'Codex' : 'Claude');
 const prNum = (u) => '#' + basename(u);
 function turnSummary(t) {
@@ -1560,7 +1566,7 @@ function renderRow(it, view) {
     class: 'row' + (it.archived ? ' archived' : '') + (view.current === it.key ? ' sel' : ''), role: 'link', tabindex: '0', 'data-key': it.key,
     onclick: (e) => { if (!e.target.closest('button, a')) open(); },
     onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); },
-  }, st, projLabel(it.p), toolBadge(it.tool),
+  }, st, view.byProject ? locLabel(it) : projLabel(it.p), toolBadge(it.tool),
   h('span', { class: 't' }, h('span', { title: it.title }, it.title),
     it.active ? h('span', { class: 'tag live', title: 'Written to in the last 90 seconds' }, 'live') : null,
     it.remote ? h('span', { class: 'tag remote', title: 'Has been driven over Remote Control' }, icon('cloud', 10), 'remote') : null,
@@ -1573,6 +1579,48 @@ function renderRow(it, view) {
 }
 
 const IDLE_CAP = 40;
+const PROJ_CAP = 8; // rows shown per project section before "Show more"
+
+// The board grouped by project: one section per project with chats, in the project list's
+// order. Chats that need you or are working come first, as tiles; the rest are rows.
+function renderProjectGroups(model, view, projects) {
+  const groups = new Map();
+  for (const it of model.all) {
+    const id = it.p ? it.p.id : '?';
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(it);
+  }
+  const order = projects.filter((p) => groups.has(p.id));
+  if (groups.has('?')) order.push(null);
+  if (!order.length) return [h('div', { class: 'empty-lane' }, view.filterText ? 'Nothing matches.' : 'No chats yet.')];
+  const rank = (it) => (it.lane === 'needs' ? 0 : it.lane === 'working' ? 1 : 2);
+  return order.map((p) => {
+    const id = p ? p.id : '?';
+    const items = groups.get(id).sort((a, b) => rank(a) - rank(b) || b.updated - a.updated);
+    const hot = items.filter((it) => rank(it) < 2), rest = items.filter((it) => rank(it) === 2);
+    const nn = items.filter((it) => it.lane === 'needs').length, nw = items.filter((it) => it.lane === 'working').length;
+    const collapsed = view.collapsed.has(id);
+    const cap = 'p:' + id, all = view.showAll.has(cap) || rest.length <= PROJ_CAP + 2, shown = all ? rest : rest.slice(0, PROJ_CAP);
+    const canAct = p && !p.other;
+    return h('section', { class: 'pgroup' + (collapsed ? ' collapsed' : ''), 'data-project': id },
+      h('div', { class: 'pg-h' },
+        h('button', { type: 'button', class: 'pg-t', 'aria-expanded': String(!collapsed), title: collapsed ? 'Show chats' : 'Hide chats', onclick: () => view.onToggleGroup(id) },
+          h('span', { class: 'chev' }, icon('chevronRight', 12)), projSw(p), h('b', null, p ? p.name : 'Not in a project'),
+          p && p.pinned ? h('span', { class: 'pin', title: 'Pinned' }, icon('star', 10)) : null),
+        h('span', { class: 'cnt' }, plural(items.length, 'chat')),
+        nn ? h('span', { class: 'pg-nn' }, `${nn} need${nn === 1 ? 's' : ''} you`) : null,
+        nw ? h('span', { class: 'pg-nw' }, h('span', { class: 'spinner' }), `${nw} working`) : null,
+        h('span', { class: 'rule' }),
+        canAct ? h('button', { type: 'button', class: 'btn sm ghost', title: `New Claude chat in ${p.name}`, onclick: () => view.onNewChat(p, 'claude') }, icon('plus', 11), toolBadge('claude', 'sm')) : null,
+        canAct ? h('button', { type: 'button', class: 'btn sm ghost', title: `New Codex chat in ${p.name}`, onclick: () => view.onNewChat(p, 'codex') }, icon('plus', 11), toolBadge('codex', 'sm')) : null,
+        canAct ? h('button', { type: 'button', class: 'ibtn sm', 'aria-label': 'Actions for ' + p.name, title: 'Project actions', onclick: (e) => view.onProjectMenu(p, e.currentTarget) }, icon('more', 14)) : null),
+      collapsed ? null : [
+        hot.length ? h('div', { class: 'tiles' }, hot.map((it) => renderTile(it, view))) : null,
+        shown.length ? h('div', { class: 'rows' }, shown.map((it) => renderRow(it, view)),
+          all ? null : h('button', { type: 'button', class: 'rows-more', onclick: () => view.onShowAll(cap) }, `Show ${plural(rest.length - shown.length, 'more chat')}`)) : null,
+      ]);
+  });
+}
 function renderLanes(model, view) {
   const lane = (cls, name, items, hint, body, empty) => h('section', { class: 'lane ' + cls, 'data-lane': cls },
     h('div', { class: 'lane-h' }, h('span', { class: 'lab' }, h('i'), name), h('span', { class: 'cnt' }, String(items.length)), h('span', { class: 'rule' }), hint ? h('span', { class: 'hint' }, hint) : null),
@@ -1601,7 +1649,19 @@ function renderFeed(events, view) {
 }
 
 function renderSessionList(model, view) {
-  const groups = [['Needs you', model.lanes.needs], ['Working', model.lanes.working], ['Recent', model.lanes.done], ['Idle', model.lanes.idle]];
+  let groups = [['Needs you', model.lanes.needs], ['Working', model.lanes.working], ['Recent', model.lanes.done], ['Idle', model.lanes.idle]];
+  if (view.byProject) { // one group per project, chats that need you or are working first
+    const rank = (it) => (it.lane === 'needs' ? 0 : it.lane === 'working' ? 1 : 2);
+    const by = new Map();
+    for (const it of model.all) {
+      const k = it.p ? it.p.id : '?';
+      if (!by.has(k)) by.set(k, [it.p ? it.p.name : 'Not in a project', []]);
+      by.get(k)[1].push(it);
+    }
+    const order = (view.projects || []).map((p) => p.id).filter((id) => by.has(id));
+    if (by.has('?')) order.push('?');
+    groups = order.map((id) => [by.get(id)[0], by.get(id)[1].sort((a, b) => rank(a) - rank(b) || b.updated - a.updated)]);
+  }
   const out = [];
   for (const [name, items] of groups) {
     const list = items.filter((it) => !it.archived || it.key === view.current);

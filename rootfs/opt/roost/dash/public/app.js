@@ -49,7 +49,7 @@ const App = {
   usage: null,
   chats: new Map(),    // key -> entry {state, es, live, loaded, key, streamKey, seq}
   drafts: new Map(),   // placeholder chats created in this browser (key -> {chat, projectId})
-  view: { current: null, meta: null, filter: store.get('roost.board.filter', '*'), text: '', showArchived: false, showAll: new Set(), slText: '' },
+  view: { current: null, meta: null, filter: store.get('roost.board.filter', '*'), text: '', showArchived: false, showAll: new Set(), slText: '', groupBy: store.get('roost.board.group', 'status'), collapsed: new Set(store.get('roost.board.collapsed', [])) },
   consoles: new Set(),
   lastChat: store.get('roost.lastChat', null),
   route: 'board',
@@ -527,6 +527,9 @@ function scheduleBoard() { if (!boardRaf) boardRaf = requestAnimationFrame(() =>
 const boardView = {
   get filter() { return App.view.filter; },
   get current() { return App.view.current; },
+  get byProject() { return App.view.groupBy === 'project'; },
+  get collapsed() { return App.view.collapsed; },
+  onToggleGroup: (id) => { const s = App.view.collapsed; if (s.has(id)) s.delete(id); else s.add(id); store.set('roost.board.collapsed', [...s]); renderBoard(true); },
   get denyOpen() { return App.denyOpen; },
   get denyDraft() { return App.denyDraft; },
   get busy() { return App.busy; },
@@ -572,7 +575,7 @@ function renderBoard(force) {
     const m = lanesOf(items, { filter: App.view.filter, text: App.view.text, archived: App.view.showArchived });
     const first = m.lanes.needs.find((x) => x.sum.perms.length && x.ui === 'needs');
     boardView.firstKey = first ? first.key : null;
-    const sig = JSON.stringify([m.lanes, App.view.filter, App.view.showArchived, [...App.view.showAll], [...App.denyOpen], [...App.busy], boardView.firstKey, Math.floor(Date.now() / 30000)], (k, v) => (k === 'p' || k === 'loc' || k === 'lv' || k === 'c' ? (v && (v.id || v.key || v.path || 1)) : v));
+    const sig = JSON.stringify([m.lanes, App.view.groupBy, [...App.view.collapsed], App.view.filter, App.view.showArchived, [...App.view.showAll], [...App.denyOpen], [...App.busy], boardView.firstKey, Math.floor(Date.now() / 30000)], (k, v) => (k === 'p' || k === 'loc' || k === 'lv' || k === 'c' ? (v && (v.id || v.key || v.path || 1)) : v));
     if (force || sig !== lastSig.lanes) {
       lastSig.lanes = sig;
       const lanes = $('#lanes');
@@ -580,7 +583,8 @@ function renderBoard(force) {
       const denyKey = fe && fe.dataset && fe.dataset.deny;
       const sel = denyKey ? [fe.selectionStart, fe.selectionEnd] : null;
       const y = lanes.scrollTop;
-      lanes.replaceChildren(...renderLanes(m, boardView));
+      lanes.classList.toggle('by-project', boardView.byProject);
+      lanes.replaceChildren(...(boardView.byProject ? renderProjectGroups(m, boardView, App.data.projects) : renderLanes(m, boardView)));
       lanes.scrollTop = y;
       if (denyKey) { const inp = $(`[data-deny="${CSS.escape(denyKey)}"]`); if (inp) { inp.focus(); try { inp.setSelectionRange(sel[0], sel[1]); } catch {} } }
     }
@@ -603,14 +607,25 @@ function renderBoard(force) {
   }
   if (App.route === 'chat') {
     const m = lanesOf(items, { text: App.view.slText });
-    const sig = JSON.stringify([m.lanes.needs, m.lanes.working, m.lanes.done, m.lanes.idle].map((l) => l.map((it) => [it.key, it.title, it.ui, it.lane, it.p && it.p.color, Math.floor(it.updated / 60000)])).concat([App.view.current, Math.floor(Date.now() / 60000)]));
+    const sig = JSON.stringify([m.lanes.needs, m.lanes.working, m.lanes.done, m.lanes.idle].map((l) => l.map((it) => [it.key, it.title, it.ui, it.lane, it.p && it.p.color, Math.floor(it.updated / 60000)])).concat([App.view.current, App.view.groupBy, Math.floor(Date.now() / 60000)]));
     if (force || sig !== lastSig.slist) {
       lastSig.slist = sig;
       const sl = $('#slist'), y = sl.scrollTop;
-      sl.replaceChildren(...renderSessionList(m, { current: App.view.current, filterText: App.view.slText, onOpen: openChat }));
+      sl.replaceChildren(...renderSessionList(m, { current: App.view.current, filterText: App.view.slText, onOpen: openChat, byProject: App.view.groupBy === 'project', projects: App.data.projects }));
       sl.scrollTop = y;
     }
   }
+}
+
+// Group the board (and the chat sidebar) by state lanes or by project.
+function setGroupBy(v) {
+  App.view.groupBy = v === 'project' ? 'project' : 'status';
+  store.set('roost.board.group', App.view.groupBy);
+  syncGroupButtons();
+  renderBoard(true);
+}
+function syncGroupButtons() {
+  for (const b of document.querySelectorAll('[data-group]')) b.setAttribute('aria-pressed', String(b.dataset.group === App.view.groupBy));
 }
 
 function updateNeeds(n) {
@@ -1170,6 +1185,8 @@ function initShell() {
   $('#filter').addEventListener('input', (e) => { App.view.text = e.target.value; renderBoard(true); });
   $('#sl-filter').addEventListener('input', (e) => { App.view.slText = e.target.value; renderBoard(true); });
   $('#archived-btn').addEventListener('click', () => setArchived(!App.view.showArchived));
+  for (const b of document.querySelectorAll('[data-group]')) b.addEventListener('click', () => setGroupBy(b.dataset.group));
+  syncGroupButtons();
 
   // Palette
   $('#pal-in').addEventListener('input', () => { Pal.sel = 0; renderPal(); });
