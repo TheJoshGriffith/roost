@@ -192,8 +192,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/live/history') {
       const key = url.searchParams.get('key') || '';
       if (!/^(claude|codex):[A-Za-z0-9-]+$/.test(key)) return send(res, 400, { error: 'bad key' });
-      const events = await live.history(key);
-      return events ? send(res, 200, { events }) : send(res, 404, { error: 'unknown chat' });
+      const h = await live.history(key);
+      return h ? send(res, 200, h) : send(res, 404, { error: 'unknown chat' });
     }
     if (req.method === 'GET' && (m = p.match(/^\/api\/chats\/(claude|codex)\/([A-Za-z0-9-]+)$/))) {
       const items = await projects.transcript(`${m[1]}:${m[2]}`);

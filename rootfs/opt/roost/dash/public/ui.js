@@ -614,7 +614,7 @@ function renderUnifiedDiff(text, opts = {}) {
 /* ======================================================= 4. chat state reducer */
 // Consumes the server's chat events unchanged:
 //   status, session, user, delta, text, reasoning, tool, tool-output, tool-result,
-//   permission, permission-resolved, result, notice
+//   permission, permission-resolved, result, notice, settings
 // Optional extra field (not required): `parent` on tool / tool-result / delta / text /
 // reasoning = the id of a Task tool call, to nest subagent work inside its card.
 const BUSY = new Set(['starting', 'thinking', 'responding', 'tool', 'waiting']);
@@ -636,6 +636,9 @@ function applyEvent(st, ev, now = Date.now()) {
       break;
     case 'session':
       st.sessionId = ev.id; st.model = ev.model ?? st.model; st.mode = ev.mode ?? st.mode; chrome = true;
+      break;
+    case 'settings': // the agent switched its own mode (e.g. an "always allow" or leaving plan mode)
+      st.mode = ev.mode ?? st.mode; chrome = true;
       break;
     case 'user': add({ kind: 'user', text: ev.text || '', attachments: ev.attachments, queued: !!ev.queued }); break;
     case 'delta': {

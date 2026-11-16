@@ -83,8 +83,7 @@ function ingest(entry, ev, at) {
   ev.type = ev.type || ev.t;
   if (ev.type === 'session') {
     // Only keep a model name the picker knows (the server reports full model ids).
-    const known = MODELS[entry.state.meta.tool || toolOf(entry.key)] || [];
-    if (!known.some((m) => m.v === ev.model)) delete ev.model;
+    if (!knownModel(entry, ev.model)) delete ev.model;
     rekey(entry, ev.key);
   }
   if (ev.type === 'status') entry.live = ev.status !== 'closed' && ev.status !== 'offline';
@@ -94,6 +93,7 @@ function ingest(entry, ev, at) {
 }
 
 const toolOf = (key) => String(key).split(':')[0];
+const knownModel = (entry, v) => typeof v === 'string' && (MODELS[entry.state.meta.tool || toolOf(entry.key)] || []).some((m) => m.v === v);
 const isDraftKey = (key) => /:new-/.test(key);
 
 // A new chat got its real id: register it under that key and update the URL.
@@ -135,12 +135,12 @@ function connect(entry, streamKey, skipBefore, resume) {
       if (ev.live && entry.state.status !== ev.status) ingest(entry, { t: 'status', status: ev.status });
       // The session ended while we weren't following it.
       if (resume && !ev.live && wasLive) ingest(entry, { t: 'status', status: 'offline' });
-      if (ev.model && !entry.state.model) entry.state.model = ev.model;
+      if (knownModel(entry, ev.model) && entry.state.model == null) entry.state.model = ev.model;
       if (ev.mode && !entry.state.mode) entry.state.mode = ev.mode;
       return;
     }
     if (ev.seq) entry.seq = Math.max(entry.seq, ev.seq);
-    if (skipBefore && ev.at && ev.at < skipBefore && !/^(permission|permission-resolved|status|session)$/.test(ev.t)) return;
+    if (skipBefore && ev.at && ev.at < skipBefore && !/^(permission|permission-resolved|status|session|settings)$/.test(ev.t)) return;
     ingest(entry, ev);
   };
 }
@@ -166,9 +166,14 @@ async function loadHistory(entry) {
   entry.loaded = true;
   const opened = Date.now();
   try {
-    const { events } = await api('GET', `api/live/history?key=${encodeURIComponent(entry.key)}`);
+    const { events, mode, model } = await api('GET', `api/live/history?key=${encodeURIComponent(entry.key)}`);
     const t0 = opened - 60000;
     events.forEach((ev, i) => ingest(entry, ev, ev.at || t0 + i));
+    // The chat's remembered settings, so its pickers show what it will actually resume with.
+    let changed = false;
+    if (mode && !entry.state.mode) { entry.state.mode = mode; changed = true; }
+    if (model != null && entry.state.model == null && knownModel(entry, model)) { entry.state.model = model; changed = true; }
+    if (changed && chatView.state === entry.state) chatView.update({ changed: [], chrome: true });
   } catch (e) {
     ingest(entry, { t: 'notice', level: 'error', text: `Couldn't load this chat's history: ${e.message}` });
   }
@@ -198,7 +203,7 @@ async function sendMessage(text, files, ids) {
   if (files && files.length) {
     try { attachments = await uploadFiles(files); } catch (e) { toast(`Couldn\u2019t upload: ${e.message}`); return false; }
   }
-  const body = { tool: toolOf(key), text, attachments, model: st.model || undefined, mode: st.mode || undefined };
+  const body = { tool: toolOf(key), text, attachments, model: st.model ?? undefined, mode: st.mode || undefined };
   if (draft && isDraftKey(entry.key)) Object.assign(body, { project: draft.projectId, dir: draft.chat.cwd });
   else body.key = entry.key;
   // Sent mid-turn, the message joins the running turn: leave the status alone.
@@ -229,8 +234,8 @@ const chatView = createChatView($('#chat-pane'), {
       .then(() => { if (decision === 'always' && item && item.req.always) toast(`Allowed ${item.req.always}`); })
       .catch((x) => toast(x.message));
   },
-  onModel: (v) => { const e = App.chats.get(App.view.current); if (e && e.live) api('POST', 'api/live/settings', { key: liveKey(e), model: v }).catch(() => {}); },
-  onMode: (v) => { const e = App.chats.get(App.view.current); if (e && e.live) api('POST', 'api/live/settings', { key: liveKey(e), mode: v }).catch(() => {}); },
+  onModel: (v) => { const e = App.chats.get(App.view.current); if (e) DEFAULTS[toolOf(e.key)].model = v; if (e && e.live) api('POST', 'api/live/settings', { key: liveKey(e), model: v }).catch(() => {}); },
+  onMode: (v) => { const e = App.chats.get(App.view.current); if (e && !NO_CARRY_MODES.has(v)) DEFAULTS[toolOf(e.key)].mode = v; if (e && e.live) api('POST', 'api/live/settings', { key: liveKey(e), mode: v }).catch(() => {}); },
   onBack: () => { if (history.state && history.state.fromTree) history.back(); else location.hash = '#/projects'; },
   onClose: () => { location.hash = '#/projects'; },
   onTerminal: () => openInTerminal(App.view.current),
@@ -338,6 +343,8 @@ function newDraftChat(p, tool, dir) {
   const e = entryFor(key);
   e.loaded = true;
   e.state.status = 'idle';
+  e.state.mode = DEFAULTS[tool].mode;
+  e.state.model = DEFAULTS[tool].model;
   loc.chats.unshift(chat);
   p.chatCount++;
   App.view.expanded.add(p.id);
@@ -655,10 +662,20 @@ function initShell() {
     h('p', { style: 'margin:0' }, 'Every folder in /workspace is a project. File a chat under another project from its ⋯ menu (or drag it on a desktop). Grouping only changes this view: chats and files stay where they are.'));
 }
 
+// The mode and model new chats start with, per tool (null: not picked yet). The server
+// keeps the real copy; this one follows your picks so new drafts match without a refetch.
+const DEFAULTS = { claude: { mode: null, model: null }, codex: { mode: null, model: null } };
+const NO_CARRY_MODES = new Set(['bypassPermissions', 'full-access', 'plan']);
+
 async function loadModels() {
   try {
     const m = await api('GET', 'api/live/models');
     for (const tool of ['claude', 'codex']) if (m[tool] && m[tool].length) MODELS[tool] = m[tool];
+    for (const tool of ['claude', 'codex']) {
+      const d = (m.defaults && m.defaults[tool]) || {};
+      if (DEFAULTS[tool].mode == null && d.mode) DEFAULTS[tool].mode = d.mode;
+      if (DEFAULTS[tool].model == null && d.model != null && MODELS[tool].some((x) => x.v === d.model)) DEFAULTS[tool].model = d.model;
+    }
   } catch {}
 }
 

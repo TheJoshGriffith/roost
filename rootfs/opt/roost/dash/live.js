@@ -5,6 +5,7 @@
 //
 //   status      { status }                      idle | starting | thinking | responding | tool | waiting | error | closed
 //   session     { key, id, model, mode }        a new chat got its real id
+//   settings    { mode }                        the agent changed its own permission mode
 //   user        { text, attachments }        attachments: [{ id, name, size, type, image, url }]
 //   delta       { text }                        streaming assistant text
 //   text        { text }                        a finished assistant text block
@@ -36,6 +37,73 @@ const CODEX_BIN = process.env.ROOST_CODEX_BIN || 'codex';
 const MAX_EVENTS = 3000;
 const IDLE_CLOSE_MS = 45 * 60 * 1000;
 const TEXT_LIMIT = 20000;
+
+// ------------------------------------------------------------------ remembered chat settings
+// Each chat's permission mode and model survive reloads, restarts and idle closes,
+// and new chats start with the ones you last picked for that tool (never a risky mode).
+//   chat-settings.json: { chats: { "<tool>:<id>": { mode, model } }, last: { <tool>: { mode, model } } }
+// A model of '' means "the tool's default"; a missing one means "not picked".
+const SETTINGS_FILE = path.join(process.env.HOME || '/config/home', '.config/roost/chat-settings.json');
+const VALID_MODES = {
+  claude: new Set(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']),
+  codex: new Set(['ask', 'auto', 'full-access']),
+};
+const BUILTIN_MODE = { claude: 'default', codex: 'ask' };
+const NO_CARRY = new Set(['bypassPermissions', 'full-access', 'plan']); // never a new chat's default
+const CODEX_POLICY_MODE = { untrusted: 'ask', 'on-request': 'auto', never: 'full-access' };
+const validMode = (tool, mode) => !!(VALID_MODES[tool] && VALID_MODES[tool].has(mode));
+const validModel = (model) => typeof model === 'string' && model.length <= 120 && /^[\w.:\-\[\]/]*$/.test(model);
+let settingsStore = null;
+function settingsData() {
+  if (!settingsStore) {
+    try { settingsStore = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch {}
+    if (!settingsStore || typeof settingsStore !== 'object') settingsStore = {};
+    settingsStore.chats = settingsStore.chats || {};
+    settingsStore.last = settingsStore.last || {};
+  }
+  return settingsStore;
+}
+function saveSettings() {
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    const tmp = SETTINGS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(settingsStore, null, 2));
+    fs.renameSync(tmp, SETTINGS_FILE);
+  } catch (e) { console.error('roost: could not save chat settings:', e.message); }
+}
+// What a chat should open with: its own saved settings, or (new chats) the last picks.
+function savedSettings(tool, key) {
+  const d = settingsData();
+  const isNew = !key || /:new-/.test(key);
+  const v = (isNew ? d.last[tool] : d.chats[key]) || {};
+  return { mode: validMode(tool, v.mode) ? v.mode : null, model: validModel(v.model) ? v.model : null };
+}
+// `patch` is { mode } and/or { model }. Saved for the chat (once it has an id), and
+// also as the tool's default for new chats when `asDefault` (an explicit pick).
+function rememberSettings(tool, id, patch, asDefault) {
+  const clean = {};
+  if (validMode(tool, patch.mode)) clean.mode = patch.mode;
+  if (validModel(patch.model)) clean.model = patch.model;
+  if (!Object.keys(clean).length) return;
+  const d = settingsData();
+  let changed = false;
+  const merge = (group, key, vals) => {
+    const cur = d[group][key] || {};
+    for (const [k, v] of Object.entries(vals)) if (cur[k] !== v) { cur[k] = v; changed = true; }
+    d[group][key] = cur;
+  };
+  if (id) merge('chats', `${tool}:${id}`, clean);
+  if (asDefault) {
+    const carry = { ...clean };
+    if (NO_CARRY.has(carry.mode)) delete carry.mode;
+    if (Object.keys(carry).length) merge('last', tool, carry);
+  }
+  if (changed) saveSettings();
+}
+const chatDefaults = () => Object.fromEntries(['claude', 'codex'].map((t) => {
+  const v = savedSettings(t);
+  return [t, { mode: v.mode || BUILTIN_MODE[t], model: v.model }];
+}));
 
 const BUSY_STATUS = new Set(['starting', 'thinking', 'responding', 'tool', 'waiting']);
 const sessions = new Map(); // key -> LiveSession (a session may be registered under several keys)
@@ -84,8 +152,10 @@ class LiveSession {
     this.keys = new Set([key]);
     this.id = id || null;
     this.cwd = cwd;
-    this.model = model || '';
-    this.mode = mode || (tool === 'claude' ? 'default' : 'ask');
+    const saved = savedSettings(tool, id ? `${tool}:${id}` : key);
+    this.model = validModel(model) ? model : saved.model || '';
+    this.mode = (validMode(tool, mode) && mode) || saved.mode || BUILTIN_MODE[tool];
+    this.modelPicked = validModel(model) || saved.model != null; // an explicit pick, not the tool's own default
     this.events = [];
     this.seq = 0;
     this.status = 'starting';
@@ -131,6 +201,17 @@ class LiveSession {
 
   // Mid-turn: a message sent now joins the running turn instead of starting one.
   get busy() { return BUSY_STATUS.has(this.status); }
+
+  remember(patch, asDefault) { rememberSettings(this.tool, this.id, patch, asDefault); }
+
+  // The agent changed its own mode (an "always allow" that switches mode, leaving plan
+  // mode, ...): follow it so the picker and the saved setting stay true.
+  followMode(mode) {
+    if (!validMode(this.tool, mode) || mode === this.mode) return;
+    this.mode = mode;
+    this.remember({ mode }, false);
+    this.emit({ t: 'settings', mode });
+  }
 }
 
 // ------------------------------------------------------------------ Claude (Agent SDK)
@@ -246,11 +327,16 @@ class ClaudeSession extends LiveSession {
           this.id = m.session_id;
           if (m.model) this.model = this.model || m.model;
           this.addKey(`claude:${m.session_id}`);
-          if (fresh) this.emit({ t: 'session', key: `claude:${m.session_id}`, id: m.session_id, model: m.model, mode: m.permissionMode });
+          if (fresh) {
+            this.remember({ mode: this.mode, model: this.modelPicked ? this.model : undefined }, false);
+            this.emit({ t: 'session', key: `claude:${m.session_id}`, id: m.session_id, model: m.model, mode: m.permissionMode });
+          }
+          this.followMode(m.permissionMode);
         } else if (m.subtype === 'compact_boundary') {
           this.emit({ t: 'notice', level: 'info', text: 'Context compacted' });
-        } else if (m.subtype === 'status' && m.status === 'compacting') {
-          this.emit({ t: 'notice', level: 'info', text: 'Compacting context…' });
+        } else if (m.subtype === 'status') {
+          if (m.status === 'compacting') this.emit({ t: 'notice', level: 'info', text: 'Compacting context…' });
+          this.followMode(m.permissionMode);
         }
         break;
       case 'stream_event': {
@@ -295,14 +381,19 @@ class ClaudeSession extends LiveSession {
   }
 
   async setMode(mode) {
-    this.mode = mode;
+    if (!validMode('claude', mode)) throw Object.assign(new Error('unknown Claude mode'), { status: 400 });
     if (this.run && this.run.q) await this.run.q.setPermissionMode(mode);
+    this.mode = mode;
+    this.remember({ mode }, true);
     this.emit({ t: 'notice', level: 'info', text: `Permission mode: ${mode}` });
   }
 
   async setModel(model) {
-    this.model = model;
+    if (!validModel(model)) throw Object.assign(new Error('bad model name'), { status: 400 });
     if (this.run && this.run.q) await this.run.q.setModel(model || undefined);
+    this.model = model;
+    this.modelPicked = true;
+    this.remember({ model }, true);
     this.emit({ t: 'notice', level: 'info', text: `Model: ${model || 'default'}` });
   }
 
@@ -388,6 +479,7 @@ class CodexSession extends LiveSession {
     this.id = r.thread.id;
     this.model = this.model || r.model || '';
     this.addKey(`codex:${this.id}`);
+    if (fresh) this.remember({ mode: this.mode, model: this.modelPicked ? this.model : undefined }, false);
     if (fresh) this.emit({ t: 'session', key: `codex:${this.id}`, id: this.id, model: r.model, mode: this.mode });
     this.setStatus('idle');
   }
@@ -502,6 +594,9 @@ class CodexSession extends LiveSession {
     const p = m.params || {};
     const reply = (result) => this.write({ id: m.id, result });
     if (m.method === 'item/commandExecution/requestApproval' || m.method === 'item/fileChange/requestApproval') {
+      // Switched to full access mid-turn: the turn still runs under the policy it started
+      // with, so answer for the user rather than keep asking.
+      if (this.mode === 'full-access') { reply({ decision: 'accept' }); return; }
       const isCmd = m.method.includes('commandExecution');
       const id = String(p.approvalId || p.itemId || m.id);
       this.pending.set(id, {
@@ -538,7 +633,9 @@ class CodexSession extends LiveSession {
     this.turnStarted = Date.now();
     this.turnStarting = true;
     this.setStatus('thinking');
-    this.call('turn/start', { threadId: this.id, input }).then((r) => {
+    // The approval policy goes with every turn, so a mode change applies without a restart.
+    const { approvalPolicy } = CODEX_MODES[this.mode];
+    this.call('turn/start', { threadId: this.id, input, approvalPolicy }).then((r) => {
       // turn/started may come before or after this reply; a turn that already finished stays finished.
       if (r && r.turn && r.turn.id && r.turn.id !== this.lastTurnDone) this.turnId = this.turnId || r.turn.id;
     }, (e) => {
@@ -568,14 +665,20 @@ class CodexSession extends LiveSession {
 
   async setMode(mode) {
     if (!CODEX_MODES[mode]) throw Object.assign(new Error('unknown Codex mode'), { status: 400 });
-    // Approval and sandbox settings are fixed per thread connection; reconnect with the new ones.
+    // The policy is sent with each turn (see send). A turn already running keeps the one
+    // it started with, except that full access answers its remaining requests itself.
     this.mode = mode;
-    this.emit({ t: 'notice', level: 'info', text: `Approval mode: ${mode} (applies from your next message)` });
-    this.restartOnNextSend = true;
+    this.remember({ mode }, true);
+    const midTurn = !!this.turnId;
+    this.emit({ t: 'notice', level: 'info', text: `Approval mode: ${mode}${midTurn ? (mode === 'full-access' ? ' (approving the rest of this turn\u2019s requests)' : ' (applies from your next message)') : ''}` });
+    if (mode === 'full-access') for (const id of [...this.pending.keys()]) this.answer(id, 'allow');
   }
 
   async setModel(model) {
+    if (!validModel(model)) throw Object.assign(new Error('bad model name'), { status: 400 });
     this.model = model;
+    this.modelPicked = true;
+    this.remember({ model }, true);
     this.emit({ t: 'notice', level: 'info', text: `Model: ${model || 'default'} (applies from your next message)` });
     this.restartOnNextSend = true;
   }
@@ -601,6 +704,8 @@ async function history(key, limit = 600) {
   const file = chats.fileFor(key);
   if (!file) return null;
   const out = [];
+  let transcriptMode = null;
+  let transcriptModel = null;
   const push = (ev) => { out.push(ev); if (out.length > limit * 2) out.splice(0, out.length - limit); };
   const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of rl) {
@@ -608,6 +713,7 @@ async function history(key, limit = 600) {
     let d;
     try { d = JSON.parse(line); } catch { continue; }
     if (tool === 'claude') {
+      if (d.type === 'user' && validMode('claude', d.permissionMode)) transcriptMode = d.permissionMode;
       if (d.isSidechain || (d.type !== 'user' && d.type !== 'assistant')) continue;
       const c = d.message && d.message.content;
       if (d.type === 'user') {
@@ -625,6 +731,11 @@ async function history(key, limit = 600) {
       }
     } else {
       const p = d.payload || {};
+      if (d.type === 'turn_context') {
+        if (CODEX_POLICY_MODE[p.approval_policy]) transcriptMode = CODEX_POLICY_MODE[p.approval_policy];
+        if (validModel(p.model)) transcriptModel = p.model;
+        continue;
+      }
       if (d.type !== 'response_item') continue;
       if (p.type === 'message' && (p.role === 'user' || p.role === 'assistant')) {
         // Codex wraps attached pictures in "<image ...>" / "</image>" text items; they aren't the user's words.
@@ -648,25 +759,40 @@ async function history(key, limit = 600) {
       }
     }
   }
-  return out.slice(-limit);
+  const events = out.slice(-limit);
+  // The mode the chat should reopen in: a running session's, else the one roost saved,
+  // else (Claude chats started in a terminal) the last one the transcript recorded.
+  // Same for the model; Claude transcripts only record full model ids, so a Claude chat
+  // with no saved pick stays on "Default model".
+  const s = sessions.get(key);
+  const saved = savedSettings(tool, key);
+  const mode = (s && s.mode) || saved.mode || transcriptMode || null;
+  const model = saved.model != null ? saved.model : tool === 'codex' ? transcriptModel : null;
+  return { events, mode, model };
 }
 
 // ------------------------------------------------------------------ manager
 async function ensure({ key, tool, cwd, model, mode }) {
   let s = key && sessions.get(key);
-  // A pending restart (a mode or model change) waits until the turn is over.
-  if (s && s.running && (!s.restartOnNextSend || s.busy)) return s;
+  // A pending restart (e.g. a Codex model change) waits until the turn is over.
+  if (s && s.running && (!s.restartOnNextSend || s.busy)) {
+    // The mode the message was sent with wins, even if the picker's own update never arrived.
+    if (validMode(s.tool, mode) && mode !== s.mode) await s.setMode(mode);
+    return s;
+  }
   const id = key && !key.split(':')[1].startsWith('new-') ? key.split(':')[1] : null;
   if (s) { // restart an exited or reconfigured session in place, keeping its event history
     s.close();
     s.restartOnNextSend = false;
-    if (model !== undefined) s.model = model;
-    if (mode) s.mode = mode;
+    if (validModel(model)) { s.model = model; s.modelPicked = true; }
+    if (validMode(s.tool, mode)) s.mode = mode;
+    s.remember({ mode: s.mode, model: validModel(model) ? model : undefined }, false);
   } else {
     if (!cwd || !fs.existsSync(cwd)) throw Object.assign(new Error(`folder not found: ${cwd}`), { status: 400 });
     const Cls = tool === 'codex' ? CodexSession : ClaudeSession;
     s = new Cls({ tool, key: key || `${tool}:new-${crypto.randomBytes(4).toString('hex')}`, id, cwd, model, mode });
     for (const k of s.keys) sessions.set(k, s);
+    if (!id) rememberSettings(tool, null, { mode, model }, true); // picked for a new chat
   }
   s.setStatus('starting');
   await s.start();
@@ -740,7 +866,7 @@ async function models() {
     const p = refreshCodexModels();
     if (!codexModels.list) await Promise.race([p, new Promise((r) => setTimeout(r, 1500))]);
   }
-  return { claude, codex: [{ v: '', label: 'Default model' }, ...(codexModels.list || [])] };
+  return { claude, codex: [{ v: '', label: 'Default model' }, ...(codexModels.list || [])], defaults: chatDefaults() };
 }
 setTimeout(refreshCodexModels, 5000).unref(); // warm the cache after start-up
 
