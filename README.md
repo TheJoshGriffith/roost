@@ -2,25 +2,27 @@
 
 **An always-on home for Claude Code and Codex.** roost is one Docker container for your home server. Your agents keep working when your laptop is shut, and you can pick them up from any device.
 
-![roost on desktop: projects beside a Claude chat with an inline diff](docs/screenshots/desktop-chat-dark.png)
+![roost on desktop: the board, with one agent waiting for approval, one running a command, and recently finished chats](docs/screenshots/desktop-board-dark.png)
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/phone-chat-dark.png" alt="Chat on a phone"></td>
-    <td width="33%"><img src="docs/screenshots/phone-projects-light.png" alt="Projects tree on a phone"></td>
-    <td width="33%"><img src="docs/screenshots/phone-overview-dark.png" alt="Overview on a phone"></td>
+    <td width="33%"><img src="docs/screenshots/phone-board-dark.png" alt="The board on a phone"></td>
+    <td width="33%"><img src="docs/screenshots/phone-chat-dark.png" alt="A chat on a phone, with an expanded diff"></td>
+    <td width="33%"><img src="docs/screenshots/phone-palette-light.png" alt="The jump palette on a phone"></td>
   </tr>
   <tr>
+    <td align="center">Board</td>
     <td align="center">Chat</td>
-    <td align="center">Projects</td>
-    <td align="center">Overview</td>
+    <td align="center">Jump (⌘K)</td>
   </tr>
 </table>
+
+![A chat on desktop: the transcript with an inline diff, beside the session switcher and the files-changed panel](docs/screenshots/desktop-chat-dark.png)
 
 <sub>Screenshots use demo data (<code>scripts/seed-demo.sh</code>, captured with <code>scripts/screenshots.mjs</code>).</sub>
 
 - **A built-in chat interface for Claude and Codex**, designed mobile-first. Chats stream as they're written. Tool calls show as compact cards that expand to diffs, command output and file previews. Approvals appear inline (Allow / Always allow / Deny), so you can keep agents in ask-first mode and answer from your phone. Every chat is an ordinary Claude Code or Codex session, so you can also resume it in a terminal or in the official apps.
-- **Projects**: a tree of everything in `/workspace` (project → repo / worktree / folder → chats), built from Claude's and Codex's own transcripts. File chats into projects, archive them, and start new ones anywhere.
+- **A board of every agent**, grouped by what needs you: chats waiting for approval (approve or deny right on the board), chats working (with what they're running and its latest output), recently finished and idle. Chats come from Claude's and Codex's own transcripts, so ones started elsewhere show up too. Filter by project, and jump anywhere with ⌘K.
 - **Keys and secrets** for the agents: SSH keys for cloning and pushing, and tokens and API keys they get as environment variables. Values are write-only in the UI.
 - **Claude Code Remote Control server.** Claude sessions run in the container. You drive them from [claude.ai/code](https://claude.ai/code), the Claude mobile app or the desktop app's Code tab. Nothing depends on your laptop being awake.
 - **Codex** in persistent tmux sessions, plus the Claude and Codex extensions in VS Code.
@@ -90,14 +92,15 @@ After that, open [claude.ai/code](https://claude.ai/code), or the Claude app on 
 | The shared browser | Dashboard → **Browser** (noVNC), or the viewer panel. Set `ROOST_VNC_PASSWORD` to also expose raw VNC on 5900 |
 | Web apps you're building | The dashboard's viewer panel (see below), or a project's ⋯ → **Preview a web server…** |
 
-### Projects view
+### Board and projects
 
-The dashboard opens on **Projects**: a tree of everything in `/workspace` (project → folder, repo or worktree → chats). Claude and Codex chats are discovered from their own transcripts, so chats started from claude.ai, the apps, the terminal or VS Code all show up. From there you can:
+The dashboard opens on the **Board**: every chat in `/workspace`, in lanes for *Needs you*, *Working*, *Recently finished* and *Idle*. Claude and Codex chats are discovered from their own transcripts, so chats started from claude.ai, the apps, the terminal or VS Code all show up. Projects (a folder, repo or worktree, or a group of them) are the filter chips along the top. From there you can:
 
+- approve, deny or retry without opening a chat, and see what each working agent is doing right now,
 - see each chat's title, last activity, and whether it's live, open in a terminal, or was driven over Remote Control,
 - read a chat's transcript, or **Resume** it (`claude --resume` / `codex resume`) in a persistent terminal,
 - start a new Claude or Codex chat in any project, folder or worktree,
-- **file chats** into projects by dragging them (or with *Move to…*), and **archive** ones you're done with,
+- **file chats** into projects with *Move to project…*, and **archive** ones you're done with,
 - create projects by cloning a repo, making a folder, or grouping existing folders, then rename, colour and pin them,
 - give a project its own Remote Control server (optionally one git worktree per session) from its Edit dialog.
 
@@ -125,7 +128,7 @@ roost's chat box takes files and pictures. Attach them with the paperclip, paste
 
 ### Plan usage
 
-The **Overview** shows how much of your plan's usage windows you've used: for Claude the 5-hour and 7-day windows, plus any per-model weekly limit; for Codex, whatever windows its plan has. Each bar has a tick showing how much of the window has gone by, so a bar past its tick is running ahead of the allowance. The numbers cover the whole account, not just roost. They come from the same sources as Claude Code's `/usage` screen and Codex's rate-limit status, using roost's existing sign-ins. The Claude source is undocumented and may change. roost only reads Claude's sign-in token, never refreshes it; if the token has expired, the card says so until Claude next runs and renews it.
+The **System** screen (and the meters in the top bar) shows how much of your plan's usage windows you've used: for Claude the 5-hour and 7-day windows, plus any per-model weekly limit; for Codex, whatever windows its plan has. Each bar has a tick showing how much of the window has gone by, so a bar past its tick is running ahead of the allowance. The numbers cover the whole account, not just roost. They come from the same sources as Claude Code's `/usage` screen and Codex's rate-limit status, using roost's existing sign-ins. The Claude source is undocumented and may change. roost only reads Claude's sign-in token, never refreshes it; if the token has expired, the card says so until Claude next runs and renews it.
 
 ### Viewer: the browser and your web apps
 
@@ -150,7 +153,7 @@ By default, one Remote Control server serves `/workspace` and sessions start the
 /workspace/my-app          worktree   My App
 ```
 
-The watchdog picks up changes within about 15 seconds. The Projects view's Edit dialog edits this file for you.
+The watchdog picks up changes within about 15 seconds. A project's Edit dialog (⋯ on its chip) edits this file for you.
 
 ## Configuration
 

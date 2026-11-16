@@ -16,7 +16,7 @@ const uploads = require('./uploads');
 
 const PORT = Number(process.env.DASH_PORT || 7682);
 const HOME = process.env.HOME || '/config/home';
-const STATE = '/config/roost';
+const STATE = process.env.ROOST_STATE_DIR || '/config/roost'; // a demo instance (screenshots) uses its own
 const LOG_DIR = path.join(STATE, 'logs');
 const RC_CONF = path.join(STATE, 'rc-projects.conf');
 const PUBLIC = path.join(__dirname, 'public');

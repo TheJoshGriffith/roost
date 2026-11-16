@@ -28,6 +28,7 @@ const { spawn } = require('child_process');
 const chats = require('./chats');
 const secrets = require('./secrets');
 const uploads = require('./uploads');
+const { Board } = require('./board');
 
 // Secrets are read at the start of each agent process, so edits apply to new chats.
 const agentEnv = () => ({ ...process.env, ...secrets.env() });
@@ -162,6 +163,7 @@ class LiveSession {
     this.pending = new Map();
     this.lastActive = Date.now();
     this.turnStarted = 0;
+    this.board = new Board(this); // Mission Control's summary, kept up to date by emit()
   }
 
   get key() { return `${this.tool}:${this.id || [...this.keys][0].split(':')[1]}`; }
@@ -172,9 +174,11 @@ class LiveSession {
     sessions.set(key, this);
   }
 
-  emit(ev) {
+  // `hint` is for the board only (e.g. a tool's output before clipping); it is not sent.
+  emit(ev, hint) {
     ev.seq = ++this.seq;
     ev.at = Date.now();
+    try { this.board.update(ev, hint); } catch (e) { console.error('roost: board update failed:', e.message); }
     this.events.push(ev);
     if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS);
     const line = `data: ${JSON.stringify(ev)}\n\n`;
@@ -360,7 +364,7 @@ class ClaudeSession extends LiveSession {
       case 'user':
         for (const b of Array.isArray(m.message && m.message.content) ? m.message.content : []) {
           if (b.type !== 'tool_result') continue;
-          this.emit(claudeToolResult(b, m.tool_use_result));
+          this.emit(claudeToolResult(b, m.tool_use_result), { full: claudeFullOutput(b, m.tool_use_result), result: m.tool_use_result });
         }
         if (this.status !== 'waiting') this.setStatus('thinking');
         break;
@@ -416,6 +420,14 @@ function describeAlways(updates) {
     else for (const r of u.rules || []) rules.push(r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName);
   }
   return rules.length ? rules.join(', ') : mode ? `mode:${mode}` : null;
+}
+
+// A tool's output before clipping, so the board's tail shows how it really ended.
+function claudeFullOutput(block, extra) {
+  if (extra && typeof extra === 'object' && (typeof extra.stdout === 'string' || typeof extra.stderr === 'string')) {
+    return [extra.stdout, extra.stderr].filter(Boolean).join('\n');
+  }
+  return toText(block.content);
 }
 
 function claudeToolResult(block, extra) {
@@ -529,6 +541,10 @@ class CodexSession extends LiveSession {
         break;
       case 'thread/tokenUsage/updated':
         this.lastUsage = p.tokenUsage && p.tokenUsage.last;
+        this.countTurnTokens(p.tokenUsage);
+        break;
+      case 'turn/plan/updated': // Codex's plan is the board's to-do list
+        this.board.setTodos((p.plan || []).map((x) => ({ text: x.step, status: x.status === 'inProgress' ? 'in_progress' : x.status })));
         break;
       case 'turn/completed': {
         const t = p.turn || {};
@@ -537,7 +553,9 @@ class CodexSession extends LiveSession {
           t: 'result', ok: t.status === 'completed', durationMs: this.turnStarted ? Date.now() - this.turnStarted : null, cost: null,
           tokens: u ? { input: u.inputTokens || 0, cached: u.cachedInputTokens || 0, output: (u.outputTokens || 0) + (u.reasoningOutputTokens || 0) } : null,
           error: t.status === 'failed' ? clip((t.error && (t.error.message || JSON.stringify(t.error))) || 'turn failed', 2000) : t.status === 'interrupted' ? 'Interrupted' : null,
-        });
+        }, { tokens: this.turnTokens });
+        this.turnTokens = null;
+        this.turnBase = null;
         this.lastTurnDone = t.id || this.turnId;
         this.turnId = null;
         this.turnStarted = 0;
@@ -566,7 +584,7 @@ class CodexSession extends LiveSession {
         break;
       case 'commandExecution':
         if (!done) { this.setStatus('tool'); this.emit({ t: 'tool', id: item.id, name: 'Bash', input: { command: item.command, cwd: item.cwd } }); }
-        else this.emit({ t: 'tool-result', id: item.id, ok: item.status === 'completed' && (item.exitCode == null || item.exitCode === 0), exitCode: item.exitCode, text: clip(item.aggregatedOutput || '') });
+        else this.emit({ t: 'tool-result', id: item.id, ok: item.status === 'completed' && (item.exitCode == null || item.exitCode === 0), exitCode: item.exitCode, text: clip(item.aggregatedOutput || '') }, { full: item.aggregatedOutput || '' });
         break;
       case 'fileChange':
         if (!done) {
@@ -588,6 +606,24 @@ class CodexSession extends LiveSession {
         if (done) this.emit({ t: 'notice', level: 'info', text: 'Context compacted' });
         break;
     }
+  }
+
+  // Codex reports the thread's running total (and the last model call); a turn's tokens
+  // are the total now less the total before its first call. Normalised like Claude's:
+  // input excludes cached input, so input + cached + output is everything.
+  countTurnTokens(u) {
+    if (!u || !u.total) return;
+    const norm = (b) => ({
+      input: Math.max(0, (b.inputTokens || 0) - (b.cachedInputTokens || 0)),
+      cached: b.cachedInputTokens || 0,
+      output: b.totalTokens ? Math.max(0, b.totalTokens - (b.inputTokens || 0)) : b.outputTokens || 0,
+    });
+    const total = norm(u.total);
+    if (!this.turnBase) {
+      const last = u.last ? norm(u.last) : { input: 0, cached: 0, output: 0 };
+      this.turnBase = { input: total.input - last.input, cached: total.cached - last.cached, output: total.output - last.output };
+    }
+    this.turnTokens = { input: total.input - this.turnBase.input, cached: total.cached - this.turnBase.cached, output: total.output - this.turnBase.output };
   }
 
   onServerRequest(m) {
@@ -827,7 +863,10 @@ function list() {
   for (const s of sessions.values()) {
     if (seen.has(s)) continue;
     seen.add(s);
-    out.push({ key: s.id ? `${s.tool}:${s.id}` : [...s.keys][0], keys: [...s.keys], tool: s.tool, cwd: s.cwd, status: s.status, running: s.running, pending: s.pending.size, lastActive: s.lastActive });
+    out.push({
+      key: s.id ? `${s.tool}:${s.id}` : [...s.keys][0], keys: [...s.keys], tool: s.tool, cwd: s.cwd, status: s.status, running: s.running,
+      pending: s.pending.size, lastActive: s.lastActive, board: s.board.view(),
+    });
   }
   return out;
 }

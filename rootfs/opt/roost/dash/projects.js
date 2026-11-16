@@ -12,9 +12,10 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const chats = require('./chats');
 
-const WORKSPACE = '/workspace';
-const STORE = '/config/roost/projects.json';
-const RC_CONF = '/config/roost/rc-projects.conf';
+const WORKSPACE = process.env.ROOST_WORKSPACE || '/workspace'; // a demo instance (scripts/screenshots) points this elsewhere
+const STATE_DIR = process.env.ROOST_STATE_DIR || '/config/roost';
+const STORE = path.join(STATE_DIR, 'projects.json');
+const RC_CONF = path.join(STATE_DIR, 'rc-projects.conf');
 const ACTIVE_MS = 90 * 1000;
 const COLORS = ['#e0913f', '#5b9bd5', '#5cc27e', '#c678dd', '#e06c75', '#56b6c2', '#d19a66', '#98a2b3'];
 

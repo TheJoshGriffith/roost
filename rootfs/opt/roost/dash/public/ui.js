@@ -10,8 +10,8 @@
    4. chat state reducer                    createChatState, applyEvent
    5. chat renderers                        renderMessage, renderToolCard, renderPermission
    6. chat view (header, stream, composer)  createChatView
-   7. projects view                         renderProjectTree
-   8. overview                              renderOverview
+   7. board, session list, context rail     renderLanes, renderTile, renderRow, renderSessionList, renderContext
+   8. system                                renderSystem, usageBar, usageRow
    9. sheets + menus                        openSheet, openMenu, project form
    (10. app shell, router and backend: see app.js)
    Nothing here ever assigns model or server text to innerHTML: every string
@@ -97,6 +97,10 @@ const ICONS = {
   collapse: ['m7 20 5-5 5 5', 'm7 4 5 5 5-5'],
   cloud: ['M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z'],
   link: ['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71', 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'],
+  cmd: ['M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z'],
+  pulse: ['M3 12h4l2.5-6 5 12 2.5-6h4'],
+  board: ['M4 4h7v7H4z', 'M13 4h7v4h-7z', 'M13 10h7v10h-7z', 'M4 13h7v7H4z'],
+  eye: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
 };
 const ICON_FILL = new Set(['stop']);
 const ICON_WIDTH = { more: 3 };
@@ -1006,7 +1010,7 @@ function renderPermission(item, opts = {}) {
   else body = renderCodeBlock(JSON.stringify(i, null, 2), 'json');
   const titleId = 'pt-' + String(req.id).replace(/[^\w-]/g, '');
   const card = h('div', { class: 'perm', role: 'group', 'aria-labelledby': titleId, 'data-perm': req.id },
-    h('div', { class: 'perm-head' }, h('span', { class: 'perm-icon' }, icon('shield', 17)),
+    h('div', { class: 'perm-head' }, h('span', { class: 'perm-icon' }, icon('shield', 15)),
       h('div', { style: 'min-width:0' },
         h('div', { class: 'perm-title', id: titleId }, permTitle(req, agent)),
         h('div', { class: 'perm-sub' }, req.description || [toolInfo(req.name).label, opts.cwd ? ' \u00b7 ' + opts.cwd : ''].join('')))),
@@ -1022,9 +1026,9 @@ function renderPermission(item, opts = {}) {
         h('button', { type: 'submit', class: 'btn danger-solid' }, 'Deny'))));
   } else {
     card.append(h('div', { class: 'perm-actions' },
-      h('button', { type: 'button', class: 'btn primary allow', 'data-allow': '', onclick: () => opts.onDecide(req.id, 'allow') }, icon('check', 16), 'Allow'),
+      h('button', { type: 'button', class: 'btn allow', 'data-allow': '', onclick: () => opts.onDecide(req.id, 'allow') }, icon('check', 13), 'Allow', opts.first ? h('kbd', null, 'A') : null),
       req.always ? h('button', { type: 'button', class: 'btn', onclick: () => opts.onDecide(req.id, 'always') }, 'Always allow') : null,
-      h('button', { type: 'button', class: 'btn danger', onclick: () => opts.onDenyOpen(req.id, true) }, 'Deny')));
+      h('button', { type: 'button', class: 'btn danger', onclick: () => opts.onDenyOpen(req.id, true) }, 'Deny\u2026', opts.first ? h('kbd', null, 'D') : null)));
     const MODE_NAMES = { acceptEdits: 'auto-accept edits', bypassPermissions: 'bypass permissions', plan: 'plan mode', auto: 'auto mode', default: 'ask before edits' };
     if (req.always && String(req.always).startsWith('mode:')) {
       const m = String(req.always).slice(5);
@@ -1056,18 +1060,24 @@ function fmtBytes(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(
 function renderMessage(item, ctx) {
   let el = null;
   switch (item.kind) {
-    case 'user':
-      el = h('div', { class: 'ev ev-user' }, h('div', { class: 'bubble' }, item.text),
-        item.attachments && item.attachments.length ? h('div', { class: 'att-row' }, item.attachments.map(renderAttachment)) : null,
-        item.queued ? h('span', { class: 'ev-note', title: 'Sent while the agent was working: it reads this at its next step' }, 'Sent mid-turn') : null);
+    case 'user': {
+      const long = splitLines(item.text).length > 12 || item.text.length > 1400;
+      const open = long && ctx.isExpanded(item.uid, false);
+      el = h('div', { class: 'ev ev-user' },
+        h('div', { class: 'who' }, 'You', item.at ? h('time', { title: new Date(item.at).toLocaleString() }, new Date(item.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : null,
+          item.queued ? h('span', { class: 'q', title: 'Sent while the agent was working: it reads this at its next step' }, '\u00b7 sent mid-turn') : null),
+        h('div', { class: 'u-body' + (long && !open ? ' clamp' : '') }, item.text),
+        long ? h('button', { type: 'button', class: 'u-more', onclick: () => ctx.onToggle(item.uid) }, open ? 'Show less' : 'Show all') : null,
+        item.attachments && item.attachments.length ? h('div', { class: 'att-row' }, item.attachments.map(renderAttachment)) : null);
       break;
+    }
     case 'assistant':
       el = h('div', { class: 'ev ev-assistant', 'aria-busy': item.streaming ? 'true' : null }, renderMarkdown(item.text, { streaming: item.streaming }));
       break;
     case 'reasoning': {
       const open = ctx.isExpanded(item.uid, false);
       el = h('div', { class: 'ev ev-reasoning' + (open ? ' is-open' : '') },
-        h('button', { type: 'button', class: 'think-toggle', 'aria-expanded': String(open), onclick: () => ctx.onToggle(item.uid) }, icon('spark', 14), 'Thinking', icon('chevronRight', 12, 'chev')),
+        h('button', { type: 'button', class: 'think-toggle', 'aria-expanded': String(open), onclick: () => ctx.onToggle(item.uid) }, icon('chevronRight', 12, 'chev'), 'Thinking'),
         open ? h('div', { class: 'think-body' }, renderMarkdown(item.text)) : null);
       break;
     }
@@ -1087,15 +1097,15 @@ function renderMessage(item, ctx) {
       break;
     }
     case 'permission':
-      el = h('div', { class: 'ev ev-perm' }, renderPermission(item, { agent: ctx.agent, cwd: ctx.cwd, projectName: ctx.projectName, denyOpen: ctx.denyOpen(item.req.id), onDenyOpen: ctx.onDenyOpen, onDecide: ctx.onDecide }));
+      el = h('div', { class: 'ev ev-perm' }, renderPermission(item, { agent: ctx.agent, cwd: ctx.cwd, projectName: ctx.projectName, denyOpen: ctx.denyOpen(item.req.id), onDenyOpen: ctx.onDenyOpen, onDecide: ctx.onDecide, first: !item.decision && pendingPermissions(ctx.state)[0] === item }));
       break;
     case 'result': {
       const r = item.res, tk = r.tokens || {};
       const total = (tk.input || 0) + (tk.cached || 0) + (tk.output || 0);
       const parts = [fmtDur(r.durationMs ?? item.turnMs), total ? `${fmtTokens(total)} tokens` : null, r.cost != null ? fmtCost(r.cost) : null].filter(Boolean);
       el = h('div', { class: 'ev ev-result', title: total ? `input ${fmtTokens(tk.input || 0)} \u00b7 cached ${fmtTokens(tk.cached || 0)} \u00b7 output ${fmtTokens(tk.output || 0)}` : null },
-        r.ok === false ? h('span', { class: 'rf-err' }, r.error || 'Turn failed') : null,
-        h('span', null, parts.join(' \u00b7 ')));
+        r.ok === false ? h('span', { class: 'rf-err' }, r.error || 'Turn failed') : icon('check', 11, 'ok'),
+        h('span', null, ['turn done'].concat(parts).join(' \u00b7 ')));
       break;
     }
     case 'notice':
@@ -1230,14 +1240,15 @@ function createChatView(pane, handlers) {
   }
   function renderEmpty() {
     const agent = meta.tool === 'codex' ? 'Codex' : 'Claude';
-    return h('div', { class: 'empty-chat' }, toolBadge(meta.tool, 'xl'),
-      h('h3', null, `New ${agent} chat`), h('p', { class: 'ec-sub' }, 'in ', h('b', null, meta.projectName || '')),
-      h('div', { class: 'ec-meta' }, icon('folder', 13), h('span', { class: 'path' }, meta.cwd), meta.branch ? h('span', { class: 'chip-branch' }, icon('branch', 11), meta.branch) : null),
+    return h('div', { class: 'empty-chat' },
+      h('div', { class: 'who' }, toolBadge(meta.tool), `New ${agent} chat`, meta.projectName ? ' \u00b7 ' + meta.projectName : null),
+      h('h3', null, `What should ${agent} do in `, h('span', { class: 'mono' }, meta.cwd || 'this folder'), '?'),
+      h('p', { class: 'ec-sub' }, meta.branch ? ['On ', h('span', { class: 'mono' }, meta.branch), '. '] : null, 'Nothing is created until you send the first message.'),
       h('div', { class: 'suggest' }, SUGGEST.map((s) => h('button', { type: 'button', class: 'sg-card', onclick: () => { R.ta.value = s.p; autosize(); R.ta.focus(); R.ta.setSelectionRange(s.p.length, s.p.length); syncComposer(); } }, h('span', { class: 'sg-t' }, s.t), h('span', { class: 'sg-d' }, s.d)))));
   }
 
   function header() {
-    const titleSlot = h('h2', { class: 'ch-title' });
+    const titleSlot = h('h2', { class: 'title' });
     const renderTitle = () => titleSlot.replaceChildren(h('button', { type: 'button', class: 'title-btn', title: 'Rename', onclick: editTitle }, h('span', null, meta.title), icon('pencil', 13)));
     function editTitle() {
       const input = h('input', { class: 'title-input', value: meta.title, 'aria-label': 'Chat title', maxlength: '120', enterkeyhint: 'done' });
@@ -1248,14 +1259,21 @@ function createChatView(pane, handlers) {
       titleSlot.replaceChildren(input); input.focus(); input.select();
     }
     renderTitle();
-    const pill = h('span', { class: 'status', role: 'status' });
-    const metaRow = h('div', { class: 'ch-meta' }, pill, h('span', { class: 'swatch', style: `--proj:${safeColor(meta.projectColor)}` }), h('span', { class: 'proj-label' }, meta.projectName), h('span', { class: 'path', title: meta.cwd }, meta.cwd), meta.branch ? h('span', { class: 'chip-branch' }, icon('branch', 11), meta.branch) : null);
-    const el = h('header', { class: 'ch' },
-      h('button', { type: 'button', class: 'icon-btn back', 'aria-label': 'Back to projects', onclick: handlers.onBack }, icon('arrowLeft', 20)),
-      h('div', { class: 'ch-main' }, toolBadge(meta.tool, 'lg'), h('div', { class: 'ch-text' }, titleSlot, metaRow)),
-      h('div', { class: 'ch-actions' },
-        h('button', { type: 'button', class: 'btn ghost small', title: meta.tool === 'codex' ? 'codex resume in a terminal' : 'claude --resume in a terminal', onclick: handlers.onTerminal }, icon('terminal', 16), h('span', { class: 'term-label' }, 'Open in terminal'), h('span', { class: 'sr-only' }, ' Open in terminal')),
-        h('button', { type: 'button', class: 'icon-btn sm close', 'aria-label': 'Close chat', onclick: handlers.onClose }, icon('x', 18))));
+    const pill = h('span', { class: 'state', role: 'status' });
+    const agentCmd = meta.tool === 'codex' ? 'codex resume' : 'claude --resume';
+    const crumbs = h('span', { class: 'crumbs' },
+      meta.projectName ? h('span', { class: 'pn' }, h('i', { class: 'sw', style: `--c:${safeColor(meta.projectColor)}` }), meta.projectName) : null,
+      meta.branch ? h('span', { class: 'mono' }, '\u2387 ' + meta.branch) : null,
+      meta.cwd ? h('span', { class: 'mono', title: meta.cwd }, meta.cwd) : null);
+    const tools = h('span', { class: 'tools' },
+      meta.cwd ? h('a', { class: 'ibtn hide-m', href: 'code/?folder=' + encodeURIComponent(meta.cwd), target: '_blank', rel: 'noopener', title: 'Open the folder in VS Code', 'aria-label': 'Open the folder in VS Code' }, icon('code', 16)) : null,
+      h('button', { type: 'button', class: 'ibtn hide-m', title: `Resume in a terminal (${agentCmd})`, 'aria-label': 'Open in terminal', onclick: handlers.onTerminal }, icon('terminal', 16)),
+      handlers.onViewer ? h('button', { type: 'button', class: 'ibtn', title: 'Viewer: browser and web previews', 'aria-label': 'Viewer', onclick: (e) => handlers.onViewer(e.currentTarget) }, icon('monitor', 16)) : null,
+      handlers.onDetails ? h('button', { type: 'button', class: 'ibtn', title: 'Chat details', 'aria-label': 'Chat details', onclick: handlers.onDetails }, icon('info', 16)) : null,
+      handlers.onMore ? h('button', { type: 'button', class: 'ibtn', title: 'More', 'aria-label': 'More actions', 'aria-haspopup': 'dialog', onclick: (e) => handlers.onMore(e.currentTarget) }, icon('more', 16)) : null);
+    const el = h('header', { class: 'sh' },
+      h('button', { type: 'button', class: 'ibtn back', 'aria-label': 'Back to the board', onclick: handlers.onBack }, icon('chevronLeft', 18)),
+      toolBadge(meta.tool, 'lg'), titleSlot, pill, crumbs, tools);
     return { el, pill, renderTitle };
   }
 
@@ -1300,12 +1318,12 @@ function createChatView(pane, handlers) {
     const send = h('button', { type: 'submit', class: 'send' });
     const stop = h('button', { type: 'button', class: 'send is-stop', 'aria-label': 'Stop', title: 'Stop (Esc)', hidden: true, onclick: () => handlers.onStop() }, icon('stop', 14));
     const hint = h('span', { class: 'kbd-hint' });
-    const banner = h('div', { class: 'approval-banner', hidden: true }, icon('shield', 15), h('span', null, `${agent} is waiting for your approval`), h('button', { type: 'button', class: 'link-btn', onclick: focusPermission }, 'Review'));
-    const warn = h('p', { class: 'mode-warn', hidden: true }, icon('alert', 14), h('span'));
+    const banner = h('div', { class: 'approval-banner', hidden: true }, icon('shield', 14), h('span', null, `${agent} is waiting for your approval.`), h('button', { type: 'button', class: 'link-btn', onclick: focusPermission }, 'Review'));
+    const warn = h('p', { class: 'mode-warn', hidden: true }, icon('alert', 13), h('span'));
     const form = h('form', { class: 'composer' }, chips, ta,
       h('div', { class: 'composer-bar' },
-        FEATURES.attachments ? h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Attach files or pictures', title: 'Attach files or pictures (or paste / drop them here)', onclick: () => fileIn.click() }, icon('paperclip', 18)) : null, fileIn,
-        model.el, mode.el, h('span', { class: 'spacer' }), hint, stop, send));
+        FEATURES.attachments ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Attach files or pictures', title: 'Attach files or pictures (or paste / drop them here)', onclick: () => fileIn.click() }, icon('paperclip', 15)) : null, fileIn,
+        model.el, mode.el, hint, h('span', { class: 'spacer' }), stop, send));
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = ta.value.trim();
@@ -1354,12 +1372,12 @@ function createChatView(pane, handlers) {
     const asStop = busy && !typed;
     R.ta.placeholder = offline ? `Message ${agent} to resume this chat\u2026` : busy ? `${agent} is working\u2026 type to add to this turn` : `Message ${agent}\u2026`;
     R.send.classList.toggle('is-stop', asStop);
-    R.send.replaceChildren(icon(asStop ? 'stop' : 'arrowUp', asStop ? 14 : 19));
+    R.send.replaceChildren(icon(asStop ? 'stop' : 'arrowUp', asStop ? 11 : 15));
     R.send.setAttribute('aria-label', asStop ? 'Stop' : 'Send');
     R.send.title = asStop ? 'Stop (Esc)' : busy ? `Send now: ${agent} reads it at its next step (Enter)` : 'Send (Enter)';
     R.send.disabled = !busy && !typed;
     R.stop.hidden = !(busy && typed);
-    R.hint.replaceChildren(...(busy ? (typed ? [h('kbd', null, '\u21b5'), ' send now \u00b7 ', h('kbd', null, 'Esc'), ' stop'] : [h('kbd', null, 'Esc'), ' to stop']) : [h('kbd', null, '\u21b5'), ' send \u00b7 ', h('kbd', null, '\u21e7\u21b5'), ' newline']));
+    R.hint.replaceChildren(...(busy ? (typed ? [h('kbd', null, '\u21b5'), ' send now: it joins the running turn \u00b7 ', h('kbd', null, 'Esc'), ' stop'] : ['Working \u00b7 type to add to this turn \u00b7 ', h('kbd', null, 'Esc'), ' stops']) : offline ? ['Not running \u00b7 sending resumes it in ', h('span', { class: 'mono' }, meta.cwd || 'its folder')] : [h('kbd', null, '\u21b5'), ' send \u00b7 ', h('kbd', null, '\u21e7\u21b5'), ' newline']));
     R.banner.hidden = !pendingPermissions(st).length;
     const m = MODES[meta.tool].find((x) => x.v === (st.mode || MODES[meta.tool][0].v));
     R.warn.hidden = !(m && m.danger);
@@ -1371,7 +1389,7 @@ function createChatView(pane, handlers) {
   function syncChrome() {
     if (!R) return;
     const m = statusMeta(st);
-    R.pill.className = 'status ' + m.cls; R.pill.textContent = m.label;
+    R.pill.className = 'state ' + m.cls; R.pill.textContent = m.label;
     syncComposer();
   }
 
@@ -1380,11 +1398,11 @@ function createChatView(pane, handlers) {
     show(state, m) {
       st = state; meta = m; queued.clear();
       ui.toggled.clear(); ui.showAll.clear(); ui.denyOpen.clear();
-      if (!st) { R = null; pane.replaceChildren(h('div', { class: 'pane-empty' }, h('div', null, h('div', { class: 'art' }, icon('message', 26)), h('h2', null, 'No chat open'), h('p', null, 'Pick a chat in the tree, or start one with + Claude or + Codex on a project.')))); return; }
+      if (!st) { R = null; pane.replaceChildren(h('div', { class: 'pane-empty' }, h('div', null, h('div', { class: 'art' }, icon('message', 20)), h('h2', null, 'No chat open'), h('p', null, 'Pick a session on the left or on the board, or press C to start one.')))); return; }
       const hd = header(), cp = composer();
       const inner = h('div', { class: 'stream-inner', role: 'log', 'aria-label': 'Conversation', 'aria-live': 'polite' });
       const stream = h('div', { class: 'stream' }, inner);
-      const jump = h('button', { type: 'button', class: 'jump', hidden: true, onclick: () => R.stream.scrollTo({ top: R.stream.scrollHeight, behavior: 'smooth' }) }, icon('arrowDown', 14), 'Latest');
+      const jump = h('button', { type: 'button', class: 'jump', hidden: true, onclick: () => R.stream.scrollTo({ top: R.stream.scrollHeight, behavior: 'smooth' }) }, icon('arrowDown', 13), 'Latest');
       stream.addEventListener('scroll', () => { jump.hidden = nearBottom(); }, { passive: true });
       pane.replaceChildren(hd.el, h('div', { class: 'stream-wrap' }, stream, jump), cp.el);
       R = { pill: hd.pill, renderTitle: hd.renderTitle, inner, stream, jump, ...cp };
@@ -1400,177 +1418,314 @@ function createChatView(pane, handlers) {
     },
     retitle(t) { if (R && meta) { meta.title = t; R.renderTitle(); } },
     focusComposer() { R && R.ta.focus(); },
+    // Keyboard: D opens the deny reason on a permission; reveal scrolls an item into view.
+    openDeny(id) { if (R) ctx().onDenyOpen(id, true); },
+    prefill(text) { if (!R || !text) return; R.ta.value = text; drafts.set(meta.key, text); autosize(); syncComposer(); },
+    reveal(uid) {
+      if (!R) return;
+      const slot = slotOf(st, uid);
+      const tid = uid.startsWith('tool:') ? uid.slice(5) : null;
+      if (tid && !ui.toggled.has(tid)) { const it = st.byId.get(uid); if (it && !defaultExpanded(toolInfo(it.tool.name).kind, toolState(it.result, {}))) { ui.toggled.add(tid); renderNow(slot); } }
+      const el = R.inner.querySelector(`[data-uid="${CSS.escape(slot)}"]`);
+      if (el) { el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); el.classList.remove('is-flash'); void el.offsetWidth; el.classList.add('is-flash'); }
+    },
   };
 }
 
-/* ======================================================= 7. projects view */
-// Consumes the existing GET api/projects shape (see projects.js), plus an optional
-// per-chat `ui` status for sessions running in roost's own chat UI.
-const UI_STATE = (c) => App.chatStatus(c.key);
-function chatIndicator(c) {
-  const s = UI_STATE(c);
-  if (!s) return null;
-  if (s === 'needs') return h('span', { class: 'badge needs' }, 'Needs you');
-  if (s === 'busy') return h('span', { class: 'dot busy', title: 'Working in roost', role: 'img', 'aria-label': 'Working' });
-  if (s === 'error') return h('span', { class: 'dot bad', title: 'Error', role: 'img', 'aria-label': 'Error' });
-  return h('span', { class: 'dot ring', title: 'Open in roost', role: 'img', 'aria-label': 'Open in roost' });
+/* ======================================================= 7. board, session list, context rail */
+// Board items come from app.js (boardModel): one per chat, merging GET api/projects (chats),
+// GET api/live (live sessions, with the optional `board` summary) and any chat state loaded here.
+//   it = {key, tool, title, cwd, branch, prs, archived, updated, prompts, active, remote, session,
+//         p (project), lane: needs|working|done|idle, ui: needs|error|busy|idle|null,
+//         sum: {activity, tail, perms, todos, lastTurn, tokens, error, model, mode, since}}
+function fmtClock(ms) {
+  const s = Math.max(0, Math.floor((ms || 0) / 1000));
+  const hh = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return (hh ? hh + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0');
 }
-function renderChatRow(c, view) {
-  const sel = view.current === c.key;
-  const badges = [
-    c.active ? h('span', { class: 'badge live', title: 'Written to in the last 90 seconds' }, 'live') : null,
-    c.session ? h('span', { class: 'badge', title: 'Open in a roost terminal session' }, icon('terminal', 11), 'terminal') : null,
-    c.remote ? h('span', { class: 'badge remote', title: 'Has been driven over Remote Control' }, icon('cloud', 11), 'remote') : null,
-    ...(c.prs || []).slice(0, 2).map((u) => h('a', { class: 'badge pr', href: safeUrl(u) || '#', target: '_blank', rel: 'noopener noreferrer', onclick: (e) => e.stopPropagation() }, icon('pr', 11), '#' + basename(u))),
-  ].filter(Boolean);
-  const li = h('li', { class: 'chat-item' + (sel ? ' is-selected' : ''), 'data-key': c.key, draggable: view.desktop ? 'true' : null },
-    h('button', { type: 'button', class: 'chat-open', 'data-fk': 'c:' + c.key, 'aria-current': sel ? 'true' : null, onclick: () => view.onOpen(c.key) },
-      toolBadge(c.tool, 'sm'),
-      h('span', { class: 'chat-text' },
-        h('span', { class: 'chat-title', title: c.title }, c.title),
-        h('span', { class: 'chat-meta' }, `${plural(c.prompts, 'prompt')}`, h('span', { class: 'sep' }, '\u00b7'), ago(c.updated), c.assigned ? [h('span', { class: 'sep' }, '\u00b7'), 'filed'] : null, badges)),
-      h('span', { class: 'chat-state' }, chatIndicator(c))),
-    h('button', { type: 'button', class: 'icon-btn sm chat-more', 'aria-label': 'Actions for ' + c.title, 'aria-haspopup': 'dialog', onclick: (e) => view.onChatMenu(c, e.currentTarget) }, icon('more', 18)));
-  return li;
-}
-function renderProject(p, view) {
-  const f = view.filter;
-  const match = (c) => (view.showArchived ? c.archived : !c.archived) && (!f || (c.title + ' ' + (c.cwd || '') + ' ' + (c.branch || '')).toLowerCase().includes(f));
-  const locs = p.locations.map((l) => ({ ...l, chats: l.chats.filter(match) }));
-  const shown = locs.reduce((n, l) => n + l.chats.length, 0);
-  const nameHit = !f || p.name.toLowerCase().includes(f);
-  if (f && !shown && !nameHit) return null;
-  if (view.showArchived && !shown) return null;
-  if (p.other && !shown) return null;
-  const open = view.expanded.has(p.id) || !!f;
-  const all = p.locations.flatMap((l) => l.chats).filter((c) => !c.archived);
-  const needs = all.filter((c) => UI_STATE(c) === 'needs').length;
-  const live = all.filter((c) => c.active).length;
-  const firstPath = p.paths[0];
-  const rc = p.rc && p.rc.enabled
-    ? h('button', { type: 'button', class: 'badge ' + (p.rc.running ? 'remote' : 'warn'), title: `Remote Control server for this project (${p.rc.mode})`, onclick: () => view.onEdit(p) }, icon('cloud', 11), `RC ${p.rc.running ? 'on' : 'starting'}`)
-    : null;
-  const sec = h('section', { class: 'proj' + (open ? ' is-open' : '') + (p.other ? ' other' : ''), 'data-id': p.id, 'aria-label': p.name, style: `--proj:${safeColor(p.color)}` },
-    h('div', { class: 'proj-head', 'data-drop': p.id },
-      h('button', { type: 'button', class: 'proj-toggle', 'aria-expanded': String(open), 'data-fk': 'p:' + p.id, onclick: () => view.onToggle(p.id) },
-        icon('chevronRight', 16, 'chev'), h('span', { class: 'proj-name' }, p.name),
-        p.pinned ? h('span', { class: 'proj-pin', title: 'Pinned' }, icon('star', 13)) : null),
-      h('span', { class: 'proj-badges' }, needs ? h('span', { class: 'badge needs' }, `${needs} needs you`) : live ? h('span', { class: 'badge live' }, `${live} live`) : null, rc),
-      p.other ? null : h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Actions for ' + p.name, 'aria-haspopup': 'dialog', onclick: (e) => view.onProjectMenu(p, e.currentTarget) }, icon('more', 18))),
-    h('div', { class: 'proj-sub' }, p.branch ? h('span', { class: 'chip-branch' }, icon('branch', 11), p.branch) : null,
-      `${plural(p.chatCount, 'chat')}${p.updated ? ' \u00b7 ' + ago(p.updated) : ''}${p.paths.length > 1 ? ` \u00b7 ${p.paths.length} folders` : ''}`));
-  if (open) {
-    sec.append(h('ul', { class: 'locs' }, locs.filter((l) => l.chats.length || !f).map((l) => h('li', { class: 'loc' },
-      h('div', { class: 'loc-head', title: l.path }, icon(l.kind === 'worktree' ? 'fork' : l.kind === 'repo' ? 'repo' : 'folder', 14), h('span', { class: 'loc-label' }, l.label), l.branch ? h('span', { class: 'chip-branch' }, icon('branch', 11), l.branch) : null, h('span', { class: 'loc-count' }, l.chats.length ? '' : '')),
-      l.chats.length ? h('ul', { class: 'chats' }, l.chats.map((c) => renderChatRow(c, view))) : h('p', { class: 'loc-empty' }, 'No chats yet')))));
-    if (!p.other) sec.append(h('div', { class: 'proj-actions' },
-      h('button', { type: 'button', class: 'btn', onclick: () => view.onNewChat(p, 'claude') }, icon('plus', 14), toolBadge('claude'), 'Claude'),
-      h('button', { type: 'button', class: 'btn', onclick: () => view.onNewChat(p, 'codex') }, icon('plus', 14), toolBadge('codex'), 'Codex'),
-      firstPath ? h('a', { class: 'btn ghost', title: 'Open in VS Code', href: 'code/?folder=' + encodeURIComponent(firstPath), target: '_blank', onclick: view.onExternal }, icon('code', 15), h('span', { class: 'pa-lbl' }, 'VS Code')) : null,
-      firstPath ? h('a', { class: 'btn ghost', title: 'Browse files', href: 'files/files/workspace/' + encodeURI(relPath(firstPath)), target: '_blank', onclick: view.onExternal }, icon('folderOpen', 15), h('span', { class: 'pa-lbl' }, 'Files')) : null,
-      h('button', { type: 'button', class: 'btn ghost', title: 'Edit project', onclick: () => view.onEdit(p) }, icon('pencil', 14), h('span', { class: 'pa-lbl' }, 'Edit'))));
-  }
-  return sec;
-}
-function renderProjectTree(data, view) {
-  const nodes = data.projects.map((p) => renderProject(p, view)).filter(Boolean);
-  if (!nodes.length) {
-    if (view.filter || view.showArchived) return [h('div', { class: 'tree-empty' }, view.showArchived ? 'No archived chats.' : ['Nothing matches \u201c', view.filter, '\u201d.'])];
-    return [h('div', { class: 'tree-empty' }, h('p', { style: 'margin:0 0 6px' }, h('b', null, 'No projects yet.')), h('p', { style: 'margin:0' }, 'Clone a repository or create a folder with New project, or put folders in /workspace from the terminal or the Files page. Chats from Claude and Codex appear here automatically.'))];
-  }
-  return nodes;
+const clockEl = (since, cls) => since ? h('span', { class: cls || null, 'data-clock': since }, fmtClock(Date.now() - since)) : null;
+const projSw = (p) => h('i', { class: 'sw', style: `--c:${safeColor(p && p.color)}` });
+const projLabel = (p) => h('span', { class: 'proj', title: p ? p.name : '' }, projSw(p), h('span', null, p ? p.name : ''));
+const agentName = (tool) => (tool === 'codex' ? 'Codex' : 'Claude');
+const prNum = (u) => '#' + basename(u);
+function turnSummary(t) {
+  if (!t) return null;
+  const parts = [t.durationMs ? fmtDur(t.durationMs) : null, t.cost != null ? fmtCost(t.cost) : null, t.files ? plural(t.files, 'file') : null].filter(Boolean);
+  const out = [parts.join(' · ')];
+  if (t.added || t.removed) out.push(' · ', h('span', { class: 'a' }, '+' + (t.added || 0)), ' ', h('span', { class: 'd' }, '−' + (t.removed || 0)));
+  if (t.ok === false) out.unshift(h('span', { class: 'bad' }, 'failed'), parts[0] ? ' · ' : '');
+  return out;
 }
 
-/* ======================================================= 8. overview */
-// Consumes the existing GET api/status shape (see app.js).
+function renderChips(projects, counts, view) {
+  const chip = (id, label, n, nn, p) => h('div', {
+    class: 'chip', role: 'button', tabindex: '0', 'aria-pressed': String(view.filter === id), title: p && p.paths ? p.paths.join(', ') : null,
+    onclick: () => view.onFilter(id), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); view.onFilter(id); } },
+  }, p ? projSw(p) : null, label, p && p.pinned ? h('span', { class: 'pin', title: 'Pinned' }, icon('star', 10)) : null,
+  nn ? h('span', { class: 'nn', title: plural(nn, 'chat needs', 'chats need') + ' you' }, String(nn)) : h('span', { class: 'n' }, String(n)),
+  p && !p.other ? h('button', { type: 'button', class: 'more', 'aria-label': 'Actions for ' + p.name, title: 'Project actions', onclick: (e) => { e.stopPropagation(); view.onProjectMenu(p, e.currentTarget); } }, icon('more', 13)) : null);
+  const all = counts.get('*') || { n: 0, nn: 0 };
+  return [chip('*', 'All', all.n, 0),
+    ...projects.filter((p) => !p.other || (counts.get(p.id) || {}).n).map((p) => { const c = counts.get(p.id) || { n: 0, nn: 0 }; return chip(p.id, p.name, c.n, c.nn, p); }),
+    h('button', { type: 'button', class: 'chip add', onclick: view.onNewProject }, icon('plus', 12), 'Project')];
+}
+
+function renderProjbar(p, view) {
+  const locs = (p.locations || []).map((l) => h('span', { class: 'loc', title: l.path }, icon(l.kind === 'worktree' ? 'fork' : l.kind === 'repo' ? 'repo' : 'folder', 13), h('em', null, l.path), l.branch ? h('span', null, ' ⎇ ' + l.branch) : null));
+  const prs = [...new Set(p.locations.flatMap((l) => l.chats.flatMap((c) => c.prs || [])))].slice(0, 6);
+  const first = p.paths[0];
+  return [h('b', null, projSw(p), p.name), ...locs,
+    prs.length ? h('span', { style: 'display:flex;gap:4px' }, prs.map((u) => h('a', { class: 'tag pr', href: safeUrl(u) || '#', target: '_blank', rel: 'noopener noreferrer' }, icon('pr', 11), prNum(u)))) : null,
+    p.rc && p.rc.enabled ? h('span', { class: 'tag remote', title: 'Remote Control server for this project' }, icon('cloud', 11), `RC ${p.rc.mode}${p.rc.running ? '' : ' · starting'}`) : null,
+    h('span', { class: 'acts-r' },
+      p.other ? null : h('button', { type: 'button', class: 'btn sm', onclick: () => view.onNewChat(p, 'claude') }, toolBadge('claude', 'sm'), 'New Claude chat'),
+      p.other ? null : h('button', { type: 'button', class: 'btn sm', onclick: () => view.onNewChat(p, 'codex') }, toolBadge('codex', 'sm'), 'New Codex chat'),
+      h('button', { type: 'button', class: 'btn sm ghost', onclick: (e) => view.onPreview(e.currentTarget, p) }, icon('globe', 13), 'Preview'),
+      first ? h('a', { class: 'btn sm ghost', href: 'code/?folder=' + encodeURIComponent(first), target: '_blank', rel: 'noopener' }, icon('code', 13), 'VS Code') : null,
+      first ? h('a', { class: 'btn sm ghost', href: 'files/files/workspace/' + encodeURI(relPath(first)), target: '_blank', rel: 'noopener' }, icon('folderOpen', 13), 'Files') : null,
+      p.other ? null : h('button', { type: 'button', class: 'btn sm ghost', onclick: () => view.onEdit(p) }, icon('pencil', 13), 'Edit'))];
+}
+
+function tileHead(it, right) {
+  return h('div', { class: 'tile-h' }, projLabel(it.p), toolBadge(it.tool), h('span', { class: 't', title: it.title }, it.title), right);
+}
+function renderTile(it, view) {
+  const s = it.sum, agent = agentName(it.tool);
+  const open = () => view.onOpen(it.key);
+  const tileAttrs = (cls) => ({ class: 'tile ' + cls + (view.busy.has(it.key) ? ' busy-act' : ''), 'data-key': it.key, onclick: (e) => { if (!e.target.closest('button, a, input, form')) open(); } });
+  const openBtn = h('button', { type: 'button', class: 'btn sm ghost', onclick: open }, 'Open', icon('chevronRight', 11));
+  if (it.ui === 'error') {
+    return h('div', tileAttrs('err'),
+      tileHead(it, h('span', { class: 'el', style: 'color:var(--bad-ink)' }, 'error', s.since ? [' · ', clockEl(s.since)] : null)),
+      h('div', { class: 'err-msg' }, s.error || (s.lastTurn && s.lastTurn.error) || 'The last turn failed. Open the chat to see what happened.'),
+      h('div', { class: 'acts' },
+        h('button', { type: 'button', class: 'btn sm', onclick: () => view.onRetry(it) }, icon('refresh', 12), 'Retry turn'), openBtn,
+        h('span', { class: 'sp' }),
+        h('span', { class: 'meta' }, [s.model, plural(it.prompts || 0, 'prompt'), s.tokens ? fmtTokens(s.tokens) + ' tok' : null].filter(Boolean).join(' · '))));
+  }
+  if (it.lane === 'needs') {
+    const perm = s.perms[0];
+    const since = (perm && perm.at) || s.since;
+    const denyOpen = perm && view.denyOpen.get(it.key) === perm.id;
+    const kids = [tileHead(it, h('span', { class: 'el', style: 'color:var(--sig-ink)' }, 'waiting ', clockEl(since)))];
+    if (perm) {
+      kids.push(h('div', { class: 'ask' },
+        h('div', { class: 'what' }, icon('shield', 13), h('span', null, perm.title || `${agent} wants to use `, perm.title ? null : h('b', null, perm.name))),
+        perm.summary ? h('div', { class: 'cmd' + (perm.name === 'Bash' ? ' is-sh' : '') }, perm.summary) : null,
+        perm.description ? h('div', { class: 'why' }, perm.description) : null,
+        s.perms.length > 1 ? h('div', { class: 'more-n' }, `+${plural(s.perms.length - 1, 'more request')} after this one`) : null));
+      kids.push(h('div', { class: 'acts' },
+        h('button', { type: 'button', class: 'btn sm sig', onclick: () => view.onDecide(it, perm, 'allow') }, icon('check', 12), 'Allow', view.firstKey === it.key ? h('kbd', null, 'A') : null),
+        perm.always ? h('button', { type: 'button', class: 'btn sm always', title: 'Always allow: ' + perm.always, onclick: () => view.onDecide(it, perm, 'always') }, 'Always allow', /^mode:|session/.test(perm.always) ? null : h('span', { class: 'rule' }, perm.always)) : null,
+        h('button', { type: 'button', class: 'btn sm', 'aria-expanded': String(!!denyOpen), onclick: () => view.onDenyToggle(it, perm) }, 'Deny…'),
+        h('span', { class: 'sp' }), openBtn));
+      if (denyOpen) {
+        const input = h('input', { placeholder: `Reason (sent to ${agent}), e.g. don’t push yet`, autocomplete: 'off', enterkeyhint: 'send', 'data-deny': it.key, 'aria-label': 'Reason for denying' });
+        input.value = view.denyDraft.get(it.key) || '';
+        input.addEventListener('input', () => view.denyDraft.set(it.key, input.value));
+        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); view.onDenyToggle(it, perm); } });
+        kids.push(h('form', { class: 'deny-row', onsubmit: (e) => { e.preventDefault(); view.onDecide(it, perm, 'deny', input.value.trim()); } }, input, h('button', { type: 'submit', class: 'btn sm bad' }, 'Deny')));
+      }
+    } else {
+      kids.push(h('div', { class: 'ask' }, h('div', { class: 'what' }, icon('shield', 13), h('span', null, h('b', null, `${agent} is waiting for your approval`))), h('div', { class: 'why' }, 'Open the chat to see the request.')));
+      kids.push(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'btn sm sig', onclick: open }, 'Review', icon('chevronRight', 11))));
+    }
+    return h('div', tileAttrs('needs'), kids);
+  }
+  // working
+  const a = s.activity;
+  const tail = (s.tail || []).slice(-4);
+  const t = s.todos;
+  return h('div', tileAttrs('working'),
+    tileHead(it, clockEl(s.since, 'el')),
+    h('div', { class: 'act' }, h('span', { class: 'spinner' }), h('span', null, a ? a.verb : 'Working'), a && a.target ? h('span', { class: 'v', title: a.target }, a.target) : null),
+    tail.length ? h('div', { class: 'tail' }, tail.map((l) => h('div', null, l))) : null,
+    h('div', { class: 'foot' },
+      t && t.total ? h('span', { class: 'prog', title: t.current || '' }, h('span', { class: 'bar' }, h('i', { style: `width:${Math.round((t.done / t.total) * 100)}%` })), `${t.done}/${t.total}`, t.current ? h('span', { class: 'cur hm' }, t.current) : null) : null,
+      s.tokens ? h('span', { class: 'hm' }, fmtTokens(s.tokens) + ' tok') : null,
+      s.model ? h('span', null, s.model) : null, s.mode ? h('span', { class: 'hm' }, s.mode) : null,
+      h('span', { class: 'sp' }),
+      h('button', { type: 'button', class: 'btn sm ghost', title: 'Stop this turn (Esc in the chat)', onclick: () => view.onStop(it) }, icon('stop', 10), 'Stop')));
+}
+
+function renderRow(it, view) {
+  const s = it.sum, lt = s.lastTurn;
+  const st = it.lane === 'done'
+    ? h('span', { class: 'st', title: lt && lt.ok === false ? 'Last turn failed' : 'Finished' }, lt && lt.ok === false ? icon('alert', 13, 'bad') : icon('check', 13, 'ok'))
+    : h('span', { class: 'st', title: it.ui === 'idle' ? 'Open in roost, idle' : 'Idle' }, h('span', { class: 'dot' + (it.ui === 'idle' ? ' ok' : '') }));
+  const sum = it.lane === 'done' && lt ? turnSummary(lt)
+    : [plural(it.prompts || 0, 'prompt'), it.session ? ' · in terminal' : '', it.archived ? ' · archived' : '', it.c && it.c.assigned ? ' · filed' : ''].join('');
+  const open = () => view.onOpen(it.key);
+  return h('div', {
+    class: 'row' + (it.archived ? ' archived' : '') + (view.current === it.key ? ' sel' : ''), role: 'link', tabindex: '0', 'data-key': it.key,
+    onclick: (e) => { if (!e.target.closest('button, a')) open(); },
+    onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); },
+  }, st, projLabel(it.p), toolBadge(it.tool),
+  h('span', { class: 't' }, h('span', { title: it.title }, it.title),
+    it.active ? h('span', { class: 'tag live', title: 'Written to in the last 90 seconds' }, 'live') : null,
+    it.remote ? h('span', { class: 'tag remote', title: 'Has been driven over Remote Control' }, icon('cloud', 10), 'remote') : null,
+    it.session ? h('span', { class: 'tag', title: 'Open in a roost terminal session' }, icon('terminal', 10), 'term') : null),
+  h('span', { class: 'sum' }, sum),
+  h('span', { class: 'prs' }, (it.prs || []).slice(0, 3).map((u) => h('a', { class: 'tag pr', href: safeUrl(u) || '#', target: '_blank', rel: 'noopener noreferrer', title: u }, prNum(u)))),
+  h('span', { class: 'br' }, it.branch ? [icon('branch', 11), h('span', null, it.branch)] : h('span', { style: 'color:var(--faint)' }, 'no repo')),
+  h('span', { class: 'age', title: it.updated ? new Date(it.updated).toLocaleString() : '' }, ago(it.updated)),
+  h('button', { type: 'button', class: 'mm', 'aria-label': 'Actions for ' + it.title, 'aria-haspopup': 'dialog', onclick: (e) => view.onChatMenu(it, e.currentTarget) }, icon('more', 14)));
+}
+
+const IDLE_CAP = 40;
+function renderLanes(model, view) {
+  const lane = (cls, name, items, hint, body, empty) => h('section', { class: 'lane ' + cls, 'data-lane': cls },
+    h('div', { class: 'lane-h' }, h('span', { class: 'lab' }, h('i'), name), h('span', { class: 'cnt' }, String(items.length)), h('span', { class: 'rule' }), hint ? h('span', { class: 'hint' }, hint) : null),
+    items.length ? body() : h('div', { class: 'empty-lane' }, empty));
+  const rows = (items, cap) => {
+    const all = view.showAll.has(cap) || items.length <= IDLE_CAP + 5;
+    const shown = all ? items : items.slice(0, IDLE_CAP);
+    return h('div', { class: 'rows' }, shown.map((it) => renderRow(it, view)),
+      all ? null : h('button', { type: 'button', class: 'rows-more', onclick: () => view.onShowAll(cap) }, `Show ${plural(items.length - shown.length, 'more chat')}`));
+  };
+  const L = model.lanes;
+  return [
+    lane('needs', 'Needs you', L.needs, L.needs.some((x) => x.sum.perms.length) ? ['approve or deny without opening · ', h('kbd', null, 'A'), ' allows the first'] : null,
+      () => h('div', { class: 'tiles' }, L.needs.map((it) => renderTile(it, view))), 'Nothing is waiting on you. Agents appear here the moment they ask.'),
+    lane('working', 'Working', L.working, L.working.length ? 'live' : null, () => h('div', { class: 'tiles' }, L.working.map((it) => renderTile(it, view))), 'No agent is running.'),
+    lane('done', 'Recently finished', L.done, 'last 3 hours', () => rows(L.done, 'done'), 'Nothing finished in the last 3 hours.'),
+    lane('idle', view.showArchived ? 'Idle and archived' : 'Idle', L.idle, L.idle.length ? 'open one to resume it' : null, () => rows(L.idle, 'idle'), view.filterText ? 'Nothing matches.' : 'No other chats.'),
+  ];
+}
+
+function renderFeed(events, view) {
+  if (!events.length) return [h('div', { class: 'empty-lane' }, 'State changes appear here as they happen: asks, starts, finishes and errors.')];
+  return events.map((e, i) => h('div', { class: 'fev' + (e.fresh ? ' new' : ''), onclick: e.key ? () => view.onOpen(e.key) : null },
+    h('time', null, new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })), h('span', { class: 'm ' + (e.kind || '') }),
+    h('div', { class: 'x' }, e.p ? projSw(e.p) : null, e.title ? h('b', null, e.title) : null, ' ', e.verb, e.arg ? [' ', h('code', null, e.arg)] : null)));
+}
+
+function renderSessionList(model, view) {
+  const groups = [['Needs you', model.lanes.needs], ['Working', model.lanes.working], ['Recent', model.lanes.done], ['Idle', model.lanes.idle]];
+  const out = [];
+  for (const [name, items] of groups) {
+    const list = items.filter((it) => !it.archived || it.key === view.current);
+    if (!list.length) continue;
+    out.push(h('div', { class: 'sg' }, h('span', { class: 'lab' }, name), h('span', { class: 'cnt' }, String(list.length))));
+    for (const it of list) {
+      const right = it.ui === 'needs' ? h('span', { class: 'a' }, 'ask') : it.ui === 'error' ? h('span', { class: 'a' }, 'err') : it.lane === 'working' ? h('span', { class: 'spinner' }) : h('span', { class: 'a' }, ago(it.updated));
+      out.push(h('a', { class: 'si' + (it.ui === 'needs' ? ' needs' : '') + (it.ui === 'error' ? ' err' : ''), href: '#/chat/' + encodeURIComponent(it.key), 'aria-current': it.key === view.current ? 'true' : null, title: `${it.title}\n${it.p ? it.p.name + ' · ' : ''}${it.cwd || ''}`, onclick: (e) => { e.preventDefault(); view.onOpen(it.key); } },
+        projSw(it.p), h('span', { class: 'tt' }, it.title), toolBadge(it.tool, 'sm'), right));
+    }
+  }
+  if (!out.length) out.push(h('div', { class: 'empty-lane', style: 'padding:12px' }, view.filterText ? 'Nothing matches.' : 'No chats yet.'));
+  return out;
+}
+
+// Files changed in this chat, from its Edit / MultiEdit / Write / Patch calls.
+function changedFiles(st, cwd) {
+  const files = new Map();
+  for (const it of st.items) {
+    if (it.kind !== 'tool' || !it.result || it.result.ok === false) continue;
+    const t = it.tool, k = toolInfo(t.name).kind;
+    const addF = (path, add, del, isNew) => {
+      if (!path) return;
+      const f = files.get(path) || { path, add: 0, del: 0, uid: it.uid, isNew: false };
+      f.add += add; f.del += del; f.uid = it.uid; f.isNew = f.isNew || !!isNew;
+      files.delete(path); files.set(path, f);
+    };
+    try {
+      if (k === 'edit') for (const f of editOps(t, it.result, cwd)) { const s = diffStats(f.ops); addF(f.path, s.add, s.del); }
+      else if (k === 'patch') for (const f of patchFiles(t, it.result)) { const s = diffStats(f.ops); addF(relPath(f.path, cwd), s.add, s.del, f.kind === 'add'); }
+      else if (k === 'write') addF(relPath((t.input || {}).file_path, cwd), splitLines((t.input || {}).content).length, 0, true);
+    } catch {}
+  }
+  return [...files.values()].reverse();
+}
+function chatUsage(st) {
+  const u = { input: 0, cached: 0, output: 0, cost: 0, hasCost: false, turns: 0, last: null };
+  for (const it of st.items) {
+    if (it.kind !== 'result') continue;
+    const tk = it.res.tokens || {};
+    u.input += tk.input || 0; u.cached += tk.cached || 0; u.output += tk.output || 0;
+    if (it.res.cost != null) { u.cost += it.res.cost; u.hasCost = true; }
+    u.turns++; u.last = tk;
+  }
+  return u;
+}
+function lastTodos(st) {
+  for (let i = st.items.length - 1; i >= 0; i--) { const it = st.items[i]; if (it.kind === 'tool' && it.tool.name === 'TodoWrite') return (it.tool.input || {}).todos || []; }
+  return null;
+}
+function renderContext(x, view) {
+  const { st, meta, c } = x;
+  const sec = (title, right, ...kids) => h('div', { class: 'ctx-sec' }, h('h3', null, h('span', { class: 'lab' }, title), right), ...kids);
+  const sm = statusMeta(st);
+  const model = st.model ? ((MODELS[meta.tool] || []).find((m) => m.v === st.model) || { label: st.model }).label : 'default model';
+  const modeV = st.mode || ((MODES[meta.tool] || [])[0] || {}).v; // same fallback as the composer's picker
+  const mode = modeV ? ((MODES[meta.tool] || []).find((m) => m.v === modeV) || { label: modeV }) : null;
+  const prompts = c && c.prompts != null ? c.prompts : st.items.filter((i) => i.kind === 'user').length;
+  const out = [sec('Session', h('span', { class: 'state ' + sm.cls }, sm.label),
+    h('dl', { class: 'kv' },
+      h('dt', null, 'Project'), h('dd', null, meta.projectName ? [h('i', { class: 'sw', style: `--c:${safeColor(meta.projectColor)}` }), h('span', null, meta.projectName)] : '—'),
+      h('dt', null, 'Folder'), h('dd', { class: 'mono', title: meta.cwd }, h('span', null, meta.cwd || '—')),
+      h('dt', null, 'Agent'), h('dd', null, h('span', null, (meta.tool === 'codex' ? 'Codex' : 'Claude Code') + ' · ' + model)),
+      h('dt', null, 'Mode'), h('dd', { class: 'mono', style: mode && mode.danger ? 'color:var(--bad-ink)' : null }, mode ? (mode.short || mode.label) : '—'),
+      h('dt', null, 'Prompts'), h('dd', null, String(prompts)),
+      st.turnStart && BUSY.has(st.status) ? [h('dt', null, 'Running'), h('dd', { class: 'mono' }, clockEl(st.turnStart))]
+        : c && c.updated ? [h('dt', null, 'Last active'), h('dd', { class: 'mono', title: new Date(c.updated).toLocaleString() }, ago(c.updated) + (ago(c.updated) === 'now' ? '' : ' ago'))] : null,
+      c && c.started ? [h('dt', null, 'Started'), h('dd', { class: 'mono', title: new Date(c.started).toLocaleString() }, new Date(c.started).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))] : null))];
+
+  const files = changedFiles(st, meta.cwd);
+  const tA = files.reduce((n, f) => n + f.add, 0), tD = files.reduce((n, f) => n + f.del, 0);
+  const bar = (a, d) => { const t = a + d || 1, na = Math.round((a / t) * 5), nd = Math.min(5 - na, Math.round((d / t) * 5)); return h('span', { class: 'lt', 'aria-hidden': 'true' }, [...Array(na)].map(() => h('i', { class: 'a' })), [...Array(nd)].map(() => h('i', { class: 'd' })), [...Array(5 - na - nd)].map(() => h('i'))); };
+  out.push(sec('Files changed', files.length ? h('span', { class: 'r' }, `${files.length} · `, h('span', { style: 'color:var(--add-ink)' }, '+' + tA), ' ', h('span', { style: 'color:var(--del-ink)' }, '−' + tD)) : null,
+    files.length ? h('div', { class: 'cf' }, files.slice(0, 30).map((f) => h('button', { type: 'button', title: `${f.path}${f.isNew ? ' (new file)' : ''}: show the change`, onclick: () => view.onReveal(f.uid) },
+      h('span', null, '‎' + f.path), h('b', { class: 'a' }, '+' + f.add), h('b', { class: 'd' }, '−' + f.del), bar(f.add, f.del))), files.length > 30 ? h('div', { class: 'faint-note' }, `and ${files.length - 30} more`) : null)
+      : h('div', { class: 'faint-note' }, 'No file changes yet.')));
+
+  const todos = lastTodos(st);
+  if (todos && todos.length) out.push(sec('Todos', h('span', { class: 'r' }, `${todos.filter((t) => t.status === 'completed').length}/${todos.length}`), renderTodos(todos)));
+
+  const prs = (c && c.prs) || [];
+  out.push(sec('Git', null, meta.branch || prs.length ? h('div', { class: 'pr-l' },
+    meta.branch ? h('div', { class: 'pr-i' }, icon('branch', 13), h('span', { class: 't mono', style: 'font-size:11.5px' }, meta.branch)) : null,
+    prs.map((u) => h('a', { class: 'pr-i', href: safeUrl(u) || '#', target: '_blank', rel: 'noopener noreferrer', title: u }, icon('pr', 13), h('span', { class: 'num' }, prNum(u)), h('span', { class: 't' }, hostOf(u).replace(/\/pull\/\d+$|\/-\/merge_requests\/\d+$/, '')), icon('external', 11))))
+    : h('div', { class: 'faint-note' }, 'Not a git repository, or no branch.')));
+
+  const u = chatUsage(st);
+  const total = u.input + u.cached + u.output;
+  if (u.turns) {
+    const ctxT = u.last ? (u.last.input || 0) + (u.last.cached || 0) : 0;
+    out.push(sec('Usage · this chat', null,
+      h('div', { class: 'big-n' }, h('div', null, h('b', null, fmtTokens(total)), h('span', null, 'tokens')), u.hasCost ? h('div', null, h('b', null, fmtCost(u.cost)), h('span', null, 'cost')) : null, h('div', null, h('b', null, String(u.turns)), h('span', null, plural(u.turns, 'turn').replace(/^\d+ /, '')))),
+      total ? h('div', { class: 'stack', title: `cached ${fmtTokens(u.cached)} · input ${fmtTokens(u.input)} · output ${fmtTokens(u.output)}` },
+        h('i', { style: `flex:${u.cached || 0};background:var(--text-2)` }), h('i', { style: `flex:${u.input || 0};background:var(--line-3)` }), h('i', { style: `flex:${u.output || 0};background:var(--run)` })) : null,
+      h('div', { class: 'legend' }, h('span', null, h('i', { style: 'background:var(--text-2)' }), 'cached'), h('span', null, h('i', { style: 'background:var(--line-3)' }), 'input'), h('span', null, h('i', { style: 'background:var(--run)' }), 'output')),
+      ctxT ? h('p', { class: 'small-print' }, `Last turn read ${fmtTokens(ctxT)} tokens of context.`) : null,
+      h('p', { class: 'small-print' }, 'Counted from the turns loaded here.')));
+  }
+
+  const agentCmd = meta.tool === 'codex' ? 'codex resume' : 'claude --resume';
+  out.push(sec('Actions', null, h('div', { class: 'acts-l' },
+    meta.cwd ? h('a', { href: 'code/?folder=' + encodeURIComponent(meta.cwd), target: '_blank', rel: 'noopener' }, icon('code', 13), 'Open folder in VS Code') : null,
+    meta.cwd ? h('a', { href: 'files/files/workspace/' + encodeURI(relPath(meta.cwd)), target: '_blank', rel: 'noopener' }, icon('folderOpen', 13), 'Browse files') : null,
+    h('button', { type: 'button', onclick: view.onTerminal }, icon('terminal', 13), c && c.session ? 'Attach in terminal' : 'Resume in terminal', h('kbd', null, agentCmd)),
+    h('button', { type: 'button', onclick: (e) => view.onPreview(e.currentTarget) }, icon('globe', 13), 'Preview a web server…'),
+    h('button', { type: 'button', onclick: view.onVnc }, icon('monitor', 13), 'Open the browser (VNC)'),
+    view.canMove ? h('button', { type: 'button', onclick: (e) => view.onMove(e.currentTarget) }, icon('move', 13), 'Move to project…') : null,
+    view.canArchive ? h('button', { type: 'button', onclick: view.onArchive }, icon('archive', 13), c && c.archived ? 'Unarchive chat' : 'Archive chat') : null,
+    view.canStop ? h('button', { type: 'button', class: 'bad', onclick: view.onStopLive }, icon('x', 13), 'Stop in roost') : null)));
+  return out;
+}
+
+/* ======================================================= 8. system */
+// Consumes the existing GET api/status and GET api/usage shapes.
 function setupSteps(s) {
   const a = s.accounts, steps = [];
   if (!a.claude.signedIn) steps.push({ text: ['Sign in to Claude: run ', h('code', null, 'roost-setup claude'), ' in a terminal.'], action: { label: 'Terminal', href: 'term/' } });
   const waiting = (s.rc.projects || []).find((p) => /\(y\/n\)/i.test(p.console || ''));
-  if (waiting) steps.push({ text: ['Remote Control in ', h('b', null, waiting.name || waiting.dir), ' is asking a question.'], answer: waiting.session });
+  if (waiting) steps.push({ text: ['Remote Control in ', h('b', null, waiting.name || waiting.dir), ' is asking a question.'], answer: waiting.session, sig: true });
   if (!a.codex.signedIn) steps.push({ text: ['Sign in to Codex with ', h('code', null, 'roost-setup codex'), '.'], optional: true });
-  if (!a.github.signedIn) steps.push({ text: ['Connect GitHub (and GitLab) so agents can use ', h('code', null, 'gh'), ' / ', h('code', null, 'glab'), ' and clone private repos.'], optional: true, action: { label: 'Secrets', href: '#/secrets', internal: true } });
+  if (!a.github.signedIn) steps.push({ text: ['Connect GitHub (and GitLab) so agents can use ', h('code', null, 'gh'), ' / ', h('code', null, 'glab'), ' and clone private repos.'], optional: true, action: { label: 'Connect', href: '#/secrets', internal: true } });
   if (a.ssh.enabled && a.ssh.authorizedKeys === 0) steps.push({ text: ['Add an SSH key (', h('code', null, 'roost-setup ssh'), ') to connect from terminals and the desktop app.'], optional: true });
   return steps;
 }
-function renderOverview(s, view) {
-  const a = s.accounts, steps = setupSteps(s);
-  const projects = s.rc.projects || [];
-  const anyRunning = projects.some((p) => p.running);
-  const sec = (title, aside, ...kids) => h('section', null, h('div', { class: 'sec-h' }, h('h2', null, title), aside ? h('span', { class: 'aside' }, aside) : null), ...kids);
-
-  const attention = steps.length
-    ? h('div', { class: 'card attn' }, h('ol', { class: 'attn-list' }, steps.map((st, k) => h('li', { class: 'attn-item' }, h('span', { class: 'n' }, String(k + 1)),
-      h('span', { class: 'txt' }, st.text, st.optional ? h('span', { class: 'opt' }, 'optional') : null),
-      st.answer ? h('button', { type: 'button', class: 'btn primary small', onclick: () => view.onAnswer(st.answer) }, 'Answer \u201cy\u201d') : st.action ? h('a', { class: 'btn small', href: st.action.href, target: st.action.internal ? null : '_blank', onclick: st.action.internal ? null : view.onExternal }, st.action.label) : null))))
-    : h('div', { class: 'card attn-done' }, icon('check', 18), 'All set up.');
-
-  const usageCard = view.usage ? renderUsage(view.usage, s, view) : null;
-
-  const rcRow = (p) => {
-    const asking = /\(y\/n\)/i.test(p.console || '');
-    const open = view.consoles.has(p.session);
-    return h('li', { class: 'rc-row' },
-      h('div', { class: 'rc-head' }, h('span', { class: 'dot ' + (p.running ? 'ok' : 'bad') }),
-        h('div', { class: 'grow' }, h('div', { class: 'rc-title' }, p.name || p.dir), h('div', { class: 'rc-meta' }, `${p.dir} \u00b7 ${p.mode}`)),
-        h('a', { class: 'btn ghost small', href: 'term/?arg=' + encodeURIComponent(p.session), target: '_blank', onclick: view.onExternal }, 'Console'),
-        h('button', { type: 'button', class: 'btn ghost small', onclick: () => view.onRcRestart(p.session) }, 'Restart')),
-      asking ? h('div', { class: 'rc-asking' }, h('span', { class: 'q' }, 'Waiting for an answer to a y/n question.'), h('button', { type: 'button', class: 'btn primary small', onclick: () => view.onAnswer(p.session) }, 'Answer \u201cy\u201d')) : null,
-      p.console ? h('div', { class: 'console-wrap' },
-        h('button', { type: 'button', class: 'console-toggle', 'aria-expanded': String(open), onclick: () => view.onConsole(p.session) }, icon('chevronRight', 14, 'chev'), open ? 'Hide console' : 'Show console'),
-        open ? h('pre', { class: 'console', tabindex: '0' }, p.console) : null)
-        : h('p', { class: 'small-print', style: 'margin:0 16px 12px' }, p.running ? '' : 'Not running yet. The watchdog starts it within ~15s.'));
-  };
-  const claude = h('div', { class: 'card' },
-    h('div', { class: 'card-h' }, toolBadge('claude', 'lg'), h('div', { class: 'grow' }, h('h3', null, 'Claude Code'), h('div', { class: 'sub' }, a.claude.signedIn ? `Remote Control \u00b7 ${a.claude.account || 'signed in'}` : 'Not signed in yet')),
-      h('span', { class: 'dot ' + (!a.claude.signedIn ? 'bad' : anyRunning ? 'ok' : 'warn') })),
-    h('ul', { class: 'rc-list' }, projects.map(rcRow)),
-    h('div', { class: 'card-pad', style: 'border-top:1px solid var(--line)' },
-      h('a', { class: 'btn primary', href: 'https://claude.ai/code', target: '_blank', rel: 'noopener', style: 'width:100%', onclick: view.onExternal }, 'Open claude.ai/code', icon('external', 15)),
-      h('p', { class: 'small-print' }, 'Sessions appear in claude.ai/code, the Claude mobile app and the desktop app\u2019s Code tab. They keep running when every client is closed.')));
-  const codex = h('div', { class: 'card' },
-    h('div', { class: 'card-h' }, toolBadge('codex', 'lg'), h('div', { class: 'grow' }, h('h3', null, 'Codex'), h('div', { class: 'sub' }, a.codex.signedIn ? 'Signed in' : 'Not signed in: run roost-setup codex')), h('span', { class: 'dot ' + (a.codex.signedIn ? 'ok' : 'warn') })),
-    h('div', { class: 'card-pad', style: 'border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap' },
-      h('a', { class: 'btn', href: 'term/?arg=codex', target: '_blank', onclick: view.onExternal }, icon('terminal', 15), 'Codex terminal'),
-      h('a', { class: 'btn ghost', href: 'code/', target: '_blank', onclick: view.onExternal }, icon('code', 15), 'In VS Code')));
-
-  const lnk = (ic, t, d, href, state) => h('li', null, h('a', { class: 'lnk', href, target: '_blank', onclick: view.onExternal },
-    h('span', { class: 'lnk-ic' }, icon(ic, 17)), h('span', { class: 'grow' }, h('div', { class: 'lnk-t' }, t), h('div', { class: 'lnk-d' }, d)), state || null, icon('external', 15, 'ext')));
-  const tools = h('div', { class: 'card' }, h('ul', { class: 'lnk-list' },
-    lnk('code', 'VS Code', 'Edit, review diffs and view media in /workspace', 'code/'),
-    lnk('folderOpen', 'Files', 'Upload, download, preview and share files', 'files/'),
-    lnk('terminal', 'Terminal', s.rc.sessions.length ? `tmux: ${s.rc.sessions.slice(0, 3).join(', ')}${s.rc.sessions.length > 3 ? '\u2026' : ''}` : 'Persistent tmux shell', 'term/'),
-    lnk('spark', 'Claude CLI', 'claude in a persistent terminal', 'term/?arg=claude'),
-    lnk('monitor', 'Browser (VNC)', 'The Chromium agents drive; jump in for logins', 'vnc/vnc.html?path=vnc/websockify&autoconnect=true&resize=scale&reconnect=true',
-      h('span', { class: 'lnk-state' }, h('span', { class: 'dot ' + (s.browser.up ? 'ok' : 'bad') }), s.browser.up ? 'running' : 'down'))));
-
-  const host = location.hostname || 'roost.local';
-  const sshCmd = a.ssh.enabled ? `ssh -p ${a.ssh.port} roost@${host}` : 'SSH is disabled (ROOST_SSH=false).';
-  const connect = h('div', { class: 'card card-pad' },
-    h('div', { style: 'display:flex;align-items:center;gap:10px' }, h('span', { class: 'lnk-ic' }, icon('key', 17)), h('div', null, h('div', { class: 'lnk-t' }, 'SSH'), h('div', { class: 'lnk-d' }, a.ssh.enabled ? (a.ssh.authorizedKeys ? plural(a.ssh.authorizedKeys, 'authorized key') : 'No keys yet: password login is off, add a key first') : 'Disabled'))),
-    h('div', { class: 'cmd-row' }, h('code', null, sshCmd), a.ssh.enabled ? copyButton(() => sshCmd, 'Copy', 'Copy SSH command') : null),
-    h('p', { class: 'small-print' }, 'Then ', h('code', null, 'tmux attach -t rc-workspace'), ' for the Remote Control console, or just run ', h('code', null, 'claude'), ' / ', h('code', null, 'codex'), '.'));
-
-  const versions = [s.versions.claude && 'claude ' + s.versions.claude.replace(/\s*\(.*\)/, ''), s.versions.codex, s.versions.codeServer && 'code-server ' + s.versions.codeServer.split(' ')[0]].filter(Boolean).join(' \u00b7 ');
-  const services = h('div', { class: 'card' }, h('ul', { class: 'svc-list' }, s.services.map((x) => h('li', { class: 'svc' },
-    h('div', { class: 'grow' }, h('div', { class: 'svc-name' }, x.name, h('span', { class: 'pill ' + x.state }, x.state.toLowerCase())), h('div', { class: 'svc-detail', title: x.detail }, x.detail)),
-    h('div', { class: 'svc-actions' },
-      h('button', { type: 'button', class: 'btn ghost small', onclick: () => view.onLog(x.name) }, 'Log'),
-      x.name === 'dash' || x.name === 'caddy' ? null : h('button', { type: 'button', class: 'btn ghost small', disabled: x.state === 'STARTING', onclick: () => view.onRestart(x.name) }, 'Restart'))))));
-
-  const bad = s.services.filter((x) => x.state !== 'RUNNING').length;
-  return [
-    steps.length ? sec('Needs attention', plural(steps.length, 'item'), attention) : null,
-    usageCard ? sec('Plan usage', view.usage.loading ? 'checking\u2026' : h('button', { type: 'button', class: 'link-btn us-refresh', onclick: view.onUsageRefresh }, 'Refresh'), usageCard) : null,
-    h('div', { class: 'ov-cols' },
-      h('div', { class: 'ov-col' }, sec('Agents', null, h('div', { style: 'display:grid;gap:12px' }, claude, codex))),
-      h('div', { class: 'ov-col' }, sec('Open', null, tools), sec('Connect from elsewhere', null, connect))),
-    sec('Services', bad ? `${bad} not running` : 'all running', services, h('p', { class: 'versions', style: 'margin:8px 4px 0' }, versions)),
-    steps.length ? null : sec('Setup', null, attention),
-  ].filter(Boolean);
-}
-
-/* ======================================================= 8b. plan usage */
 // "3h 52m", "2d 7h", "14m": time until a window resets.
 function fmtUntil(ms) {
   if (ms == null || isNaN(ms)) return '';
@@ -1582,45 +1737,124 @@ function fmtUntil(ms) {
 }
 const PLAN_NAMES = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise', plus: 'Plus', prolite: 'Pro Lite', business: 'Business', edu: 'Edu' };
 const planName = (p) => (p ? PLAN_NAMES[p] || p.charAt(0).toUpperCase() + p.slice(1) : null);
-
-// One bar per window: how much is used, with a tick for how much of the window has gone by.
-// Left of the tick is under pace; past it, you'll run out before the window resets.
-function usageWindow(w) {
+// How far through a usage window we are, and whether usage is running ahead of it.
+// Left of the pace tick is under pace; past it, the allowance runs out before the window resets.
+function usagePace(w) {
   const pct = Math.max(0, Math.min(100, w.percent));
   const reset = w.resetsAt ? new Date(w.resetsAt) : null;
   const left = reset ? reset - Date.now() : null;
   const elapsed = reset && w.mins ? Math.max(0, Math.min(100, 100 - (left / (w.mins * 60000)) * 100)) : null;
   const level = pct >= 90 ? 'bad' : pct >= 75 || (elapsed != null && pct > elapsed + 15 && pct >= 40) ? 'warn' : 'ok';
-  const resetText = reset ? (left <= 0 ? 'Resetting now' : `Resets in ${fmtUntil(left)}`) : '';
-  return h('li', { class: 'us-row' },
-    h('div', { class: 'us-top' }, h('span', { class: 'us-label' }, w.label), h('span', { class: 'us-pct ' + level }, `${Math.round(pct)}%`, h('span', { class: 'muted' }, ' used'))),
-    h('div', { class: 'us-bar ' + level, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct)), 'aria-label': `${w.label}: ${Math.round(pct)}% used` },
-      h('span', { class: 'us-fill', style: `width:${pct}%` }),
-      elapsed != null ? h('span', { class: 'us-pace', style: `left:${elapsed}%`, title: `${Math.round(elapsed)}% of this window has gone by` }) : null),
-    h('div', { class: 'us-meta' },
-      h('span', { title: reset ? reset.toLocaleString() : '' }, resetText),
-      elapsed != null ? h('span', null, `${Math.round(elapsed)}% of the window gone`) : null));
+  return { pct, reset, left, elapsed, level };
 }
-
-function renderUsage(u, s, view) {
+function usageBar(w, cls) {
+  const u = usagePace(w);
+  return h('span', { class: 'bar ' + (u.level !== 'ok' ? u.level : '') + (cls ? ' ' + cls : ''), role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(u.pct)), 'aria-label': `${w.label}: ${Math.round(u.pct)}% used` },
+    h('i', { style: `width:${u.pct}%` }), u.elapsed != null ? h('u', { style: `left:${u.elapsed}%`, title: `${Math.round(u.elapsed)}% of this window has gone by` }) : null);
+}
+function usageRow(w) {
+  const u = usagePace(w);
+  const d = u.elapsed != null ? Math.round(u.pct - u.elapsed) : null;
+  const pace = d == null ? '' : Math.abs(d) < 5 ? 'on pace' : d > 0 ? `ahead of pace by ${d} pts` : 'under pace';
+  return h('div', { class: 'use' },
+    h('div', { class: 'nm' }, w.label),
+    usageBar(w),
+    h('span', { class: 'pct ' + u.level }, `${Math.round(u.pct)}%`),
+    h('span', { class: 'meta' }, h('span', { title: u.reset ? u.reset.toLocaleString() : '' }, u.reset ? (u.left <= 0 ? 'resetting now' : `resets in ${fmtUntil(u.left)}`) : ''), h('span', null, pace)));
+}
+function renderUsageBody(u, s) {
   const a = s.accounts;
-  const block = (tool, name, data, signedIn) => {
-    const head = h('div', { class: 'card-h' }, toolBadge(tool, 'lg'),
-      h('div', { class: 'grow' }, h('h3', null, name), h('div', { class: 'sub' }, data && data.plan ? `${planName(data.plan)} plan` : signedIn ? 'Subscription' : 'Not signed in')));
+  const grp = (tool, name, data, signedIn) => {
     let body;
-    if (!signedIn && !data) body = h('p', { class: 'small-print us-msg' }, `Sign in to ${name} to see its plan usage.`);
-    else if (data === undefined) body = h('p', { class: 'small-print us-msg' }, spinner(13), ' Checking\u2026');
-    else if (!data) body = h('p', { class: 'small-print us-msg' }, 'No subscription sign-in found.');
-    else if (data.error) body = h('p', { class: 'small-print us-msg' }, icon('info', 14), ' ', data.error);
-    else body = h('ul', { class: 'us-list' }, data.windows.map(usageWindow),
-      data.extra ? h('li', { class: 'us-row us-extra' }, `Extra usage: ${Math.round(data.extra.percent)}% of the monthly limit`) : null);
-    return h('div', { class: 'card us-card' }, head, body);
+    if (!signedIn && !data) body = h('div', { class: 'use-msg' }, `Sign in to ${name} to see its plan usage.`);
+    else if (data === undefined) body = h('div', { class: 'use-msg' }, spinner(12), 'Checking…');
+    else if (!data) body = h('div', { class: 'use-msg' }, 'No subscription sign-in found.');
+    else if (data.error) body = h('div', { class: 'use-msg' }, icon('info', 13), data.error);
+    else body = [data.windows.map(usageRow), data.extra ? h('div', { class: 'use-msg' }, `Extra usage: ${Math.round(data.extra.percent)}% of the monthly limit`) : null];
+    return h('div', { class: 'use-grp' }, h('div', { class: 'gh' }, toolBadge(tool), name, h('small', null, data && data.plan ? planName(data.plan) + ' plan' : signedIn ? 'subscription' : 'not signed in')), body);
   };
-  return h('div', null,
-    h('div', { class: 'us-grid' },
-      block('claude', 'Claude', u.claude, a.claude.signedIn),
-      block('codex', 'Codex', u.codex, a.codex.signedIn)),
-    h('p', { class: 'small-print', style: 'margin:8px 4px 0' }, 'The tick on each bar shows how much of the window has gone by. A bar past its tick is using the allowance faster than the window passes. Usage counts everything on the account, not just roost.'));
+  return [grp('claude', 'Claude', u.claude, a.claude.signedIn), grp('codex', 'Codex', u.codex, a.codex.signedIn),
+    h('div', { class: 'use-legend' },
+      h('span', null, h('span', { class: 'bar', style: 'width:22px' }, h('i', { style: 'width:70%' })), 'used'),
+      h('span', null, h('span', { style: 'width:2px;height:10px;background:var(--text);display:inline-block' }), 'even-pace mark'),
+      h('span', null, h('span', { class: 'bar warn', style: 'width:22px' }, h('i', { style: 'width:70%' })), 'ahead of pace'))];
+}
+const panel = (title, right, ...kids) => h('section', { class: 'panel' }, h('div', { class: 'panel-h' }, typeof title === 'string' ? h('h2', null, title) : title, right != null ? h('span', { class: 'r' }, right) : null), ...kids);
+function renderSystem(s, view) {
+  const a = s.accounts, steps = setupSteps(s);
+  const projects = s.rc.projects || [];
+  const badSvc = s.services.filter((x) => x.state !== 'RUNNING');
+
+  const usage = panel('Plan usage', view.usage.loading ? 'checking…' : h('button', { type: 'button', class: 'link-btn', onclick: view.onUsageRefresh }, 'Refresh'),
+    h('div', { class: 'panel-b' }, renderUsageBody(view.usage, s), h('p', { class: 'small-print' }, 'Usage counts everything on the account, not just roost.')));
+
+  const attnRows = [
+    ...badSvc.map((x) => h('div', { class: 'attn bad' }, icon('alert', 14), h('div', { class: 'x' }, `${x.name} is ${x.state}`, h('small', null, x.detail)),
+      h('button', { type: 'button', class: 'btn sm', onclick: () => view.onLog(x.name) }, 'Log'),
+      x.name === 'dash' || x.name === 'caddy' ? null : h('button', { type: 'button', class: 'btn sm', onclick: () => view.onRestart(x.name) }, 'Restart'))),
+    ...steps.map((st) => h('div', { class: 'attn' + (st.sig ? ' sig' : '') }, icon(st.sig ? 'cloud' : 'info', 14), h('div', { class: 'x' }, st.text, st.optional ? h('span', { class: 'opt' }, 'optional') : null),
+      st.answer ? h('button', { type: 'button', class: 'btn sm sig', onclick: () => view.onAnswer(st.answer) }, 'Answer “y”')
+        : st.action ? h('a', { class: 'btn sm', href: st.action.href, target: st.action.internal ? null : '_blank' }, st.action.label) : null)),
+  ];
+  const attention = panel('Needs attention', attnRows.length ? String(attnRows.length) : null,
+    attnRows.length ? h('div', null, attnRows) : h('div', { class: 'attn-done' }, icon('check', 14), 'All set up. Nothing needs attention.'));
+
+  const rcRow = (p) => {
+    const asking = /\(y\/n\)/i.test(p.console || '');
+    const open = view.consoles.has(p.session);
+    return h('div', { class: 'rc' },
+      h('div', { class: 'rc-h' }, h('span', { class: 'dot ' + (asking ? 'sig' : p.running ? 'ok' : 'bad') }), h('b', null, 'RC · ' + (p.name || basename(p.dir) || p.dir)), h('span', { class: 'mono', title: p.dir }, `${p.dir} · ${p.mode}`), h('span', { class: 'sp' }),
+        p.console ? h('button', { type: 'button', class: 'btn sm ghost', 'aria-expanded': String(open), onclick: () => view.onConsole(p.session) }, open ? 'Hide console' : 'Console') : null,
+        h('a', { class: 'btn sm ghost', href: 'term/?arg=' + encodeURIComponent(p.session), target: '_blank', title: 'Attach to its tmux session' }, 'Attach'),
+        h('button', { type: 'button', class: 'btn sm', onclick: () => view.onRcRestart(p.session) }, 'Restart')),
+      asking ? h('div', { class: 'rc-ask' }, icon('alert', 13), h('span', { style: 'flex:1' }, 'Waiting for an answer to a y/n question.'), h('button', { type: 'button', class: 'btn sm sig', onclick: () => view.onAnswer(p.session) }, 'Answer “y”')) : null,
+      open || asking ? h('pre', { class: 'console', tabindex: '0' }, p.console || '') : null,
+      !p.running && !p.console ? h('p', { class: 'small-print', style: 'margin:0 12px 10px' }, 'Not running yet. The watchdog starts it within ~15s.') : null);
+  };
+  const claude = panel(h('span', { style: 'display:flex;align-items:center;gap:8px' }, toolBadge('claude'), h('h2', null, 'Claude Code')),
+    [h('span', { class: 'dot ' + (a.claude.signedIn ? 'ok' : 'bad') }), a.claude.signedIn ? ['signed in', a.claude.account ? ' · ' + a.claude.account : '', a.claude.browserMcp ? ' · browser MCP' : ''].join('') : 'not signed in'],
+    projects.length ? h('div', null, projects.map(rcRow)) : h('div', { class: 'panel-b' }, h('p', null, 'No Remote Control servers.')),
+    h('div', { class: 'panel-b', style: 'border-top:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap;align-items:center' },
+      h('a', { class: 'btn sm', href: 'https://claude.ai/code', target: '_blank', rel: 'noopener' }, 'Open claude.ai/code', icon('external', 11)),
+      h('span', { class: 'small-print', style: 'margin:0' }, 'Sessions also show in the Claude apps and keep running with every client closed.')));
+  const codex = panel(h('span', { style: 'display:flex;align-items:center;gap:8px' }, toolBadge('codex'), h('h2', null, 'Codex')),
+    [h('span', { class: 'dot ' + (a.codex.signedIn ? 'ok' : 'warn') }), a.codex.signedIn ? 'signed in' : 'not signed in'],
+    h('div', { class: 'panel-b', style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center' },
+      a.codex.signedIn ? null : h('span', { class: 'small-print', style: 'margin:0 8px 0 0' }, 'Run ', h('code', null, 'roost-setup codex'), ' in a terminal.'),
+      h('a', { class: 'btn sm', href: 'term/?arg=codex', target: '_blank' }, icon('terminal', 12), 'Codex terminal'),
+      h('a', { class: 'btn sm ghost', href: 'code/', target: '_blank' }, icon('code', 12), 'In VS Code')));
+  const v = s.versions || {};
+  const versions = panel('Versions', null, h('div', { class: 'panel-b' }, h('dl', { class: 'kv wide' },
+    h('dt', null, 'roost'), h('dd', { class: 'mono' }, v.roost || '—'),
+    h('dt', null, 'Claude Code'), h('dd', { class: 'mono' }, (v.claude || '—').replace(/\s*\(.*\)/, '')),
+    h('dt', null, 'Codex'), h('dd', { class: 'mono' }, v.codex || '—'),
+    h('dt', null, 'code-server'), h('dd', { class: 'mono', title: v.codeServer || '' }, (v.codeServer || '—').split(' ')[0]),
+    h('dt', null, 'Browser'), h('dd', { class: 'mono' }, s.browser && s.browser.version ? s.browser.version : s.browser && s.browser.up ? 'running' : 'down'))));
+
+  const lnk = (ic, t, d, href) => h('a', { class: 'lnk', href, target: '_blank', rel: 'noopener' }, icon(ic, 15), t, h('small', null, d));
+  const host = location.hostname || 'roost.local';
+  const sshCmd = a.ssh.enabled ? `ssh -p ${a.ssh.port} roost@${host}` : 'SSH is disabled (ROOST_SSH=false).';
+  const listening = (s.previews && s.previews.listening) || [];
+  const openP = panel('Open', null, h('div', { class: 'panel-b' },
+    h('div', { class: 'lnks' },
+      lnk('code', 'VS Code', '/code/', 'code/'), lnk('folderOpen', 'Files', '/files/', 'files/'),
+      lnk('terminal', 'Terminal', s.rc.sessions.length ? 'tmux' : '/term/', 'term/'), lnk('spark', 'Claude CLI', '/term/?claude', 'term/?arg=claude'),
+      h('button', { type: 'button', class: 'lnk', onclick: view.onVnc }, icon('monitor', 15), 'Browser', h('small', null, h('span', { class: 'dot ' + (s.browser.up ? 'ok' : 'bad'), style: 'margin-right:5px' }), 'VNC')),
+      h('button', { type: 'button', class: 'lnk', onclick: (e) => view.onPreview(e.currentTarget) }, icon('globe', 15), 'Web previews', h('small', null, listening.length ? listening.slice(0, 3).map((l) => ':' + l.port).join(' ') : s.previews && s.previews.enabled ? 'none running' : 'off'))),
+    h('div', { class: 'small-print', style: 'margin-top:12px' }, a.ssh.enabled ? `SSH into the container (${a.ssh.authorizedKeys ? plural(a.ssh.authorizedKeys, 'authorised key') : 'no keys yet: add one first'})` : 'SSH'),
+    h('div', { class: 'cmdline' }, h('code', null, sshCmd), a.ssh.enabled ? copyButton(() => sshCmd, 'Copy', 'Copy SSH command') : null),
+    h('p', { class: 'small-print' }, 'Then ', h('code', null, 'tmux attach -t rc-workspace'), ' for the Remote Control console, or run ', h('code', null, 'claude'), ' / ', h('code', null, 'codex'), '.')));
+  const services = panel('Services', `supervisord · ${s.services.length - badSvc.length} of ${s.services.length} running`,
+    h('div', null, s.services.map((x) => h('div', { class: 'svc' + (x.state !== 'RUNNING' ? ' bad' : '') },
+      h('span', { class: 'dot ' + (x.state === 'RUNNING' ? 'ok' : x.state === 'STARTING' ? 'warn' : 'bad') }), h('span', null, x.name),
+      h('span', { class: 'd', title: x.detail }, x.state === 'RUNNING' ? x.detail : `${x.state} · ${x.detail}`),
+      h('span', { class: 'b' }, h('button', { type: 'button', class: 'btn sm ghost', onclick: () => view.onLog(x.name) }, 'Log'),
+        x.name === 'dash' || x.name === 'caddy' ? null : h('button', { type: 'button', class: 'btn sm ghost', disabled: x.state === 'STARTING', onclick: () => view.onRestart(x.name) }, 'Restart'))))));
+
+  return [h('div', { class: 'cols' },
+    h('div', { class: 'col' }, usage, attention),
+    h('div', { class: 'col' }, claude, codex, versions),
+    h('div', { class: 'col' }, openP, services))];
 }
 
 /* ======================================================= 9. sheets + menus */
@@ -1652,11 +1886,15 @@ function openMenu(anchor, items, title) {
     })));
   d.style.top = d.style.left = '';
   d.showModal();
-  if (matchMedia('(min-width: 640px)').matches && anchor) {
-    const r = anchor.getBoundingClientRect(), mw = d.offsetWidth, mh = d.offsetHeight;
+  const r = anchor && anchor.isConnected ? anchor.getBoundingClientRect() : null;
+  if (matchMedia('(min-width: 721px)').matches && r && (r.width || r.height)) {
+    const mw = d.offsetWidth, mh = d.offsetHeight;
     const left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw));
     const top = r.bottom + 4 + mh > window.innerHeight - 8 ? Math.max(8, r.top - mh - 4) : r.bottom + 4;
     d.style.left = left + 'px'; d.style.top = top + 'px';
+  } else if (matchMedia('(min-width: 721px)').matches) {
+    // No anchor (a menu opened from the palette or a sheet): centre it near the top.
+    d.style.left = Math.max(8, (window.innerWidth - d.offsetWidth) / 2) + 'px'; d.style.top = Math.round(window.innerHeight * 0.16) + 'px';
   } else { d.style.top = ''; d.style.left = ''; }
   d.querySelector('.menu-item')?.focus();
 }

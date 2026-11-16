@@ -53,10 +53,10 @@ const Secrets = {
     const root = $('#secrets');
     if (!root) return;
     const d = this.data;
-    if (!d) { root.replaceChildren(h('p', { class: 'muted', style: 'padding:16px' }, 'Loading…')); return; }
-    const sec = (title, aside, ...kids) => h('section', null, h('div', { class: 'sec-h' }, h('h2', null, title), aside ? h('span', { class: 'aside' }, aside) : null), ...kids);
+    if (!d) { root.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, 'Loading…')); return; }
+    const sec = (title, aside, ...kids) => h('section', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h2', null, title), aside ? h('span', { class: 'r' }, aside) : null), ...kids);
 
-    const intro = h('div', { class: 'card card-pad sx-intro' },
+    const intro = h('div', { class: 'panel-b sx-intro' },
       h('p', null, 'Keys and tokens the agents can use while they work: SSH keys for cloning and pushing, and secrets they get as environment variables.'),
       h('p', { class: 'small-print' }, icon('shield', 14), ' Values are write-only here. But anything an agent can use, it can also read, so prefer narrowly scoped tokens (e.g. a fine-grained GitHub token for specific repos).'));
 
@@ -130,18 +130,20 @@ const Secrets = {
 
     // ---------------------------------------------------------- where they apply
     const rc = (App.status && App.status.rc && App.status.rc.projects) || [];
-    const apply = h('div', { class: 'card card-pad sx-apply' + (this.changedSinceRestart ? ' is-changed' : '') },
+    const apply = h('div', { class: 'panel-b sx-apply' + (this.changedSinceRestart ? ' is-changed' : '') },
       h('p', null, h('b', null, 'Where they apply. '), 'New chats, terminals, SSH sessions and git commands pick up changes straight away. Chats already running, the Remote Control server and VS Code keep the old values until they restart.'),
       rc.length ? h('div', { class: 'sx-foot', style: 'padding:0;margin-top:10px' },
         h('button', { type: 'button', class: 'btn small' + (this.changedSinceRestart ? ' primary' : ''), onclick: () => this.restartRc(rc) }, icon('refresh', 15), 'Restart Remote Control'),
         h('span', { class: 'small-print' }, 'Agents can run ', h('code', null, 'roost-secrets'), ' to see what’s available.')) : null);
 
-    root.replaceChildren(
-      intro,
-      sec('CLI tools', null, cliCard),
-      sec('SSH keys', d.keys.length ? plural(d.keys.length, 'key') : null, keys),
-      sec('Secrets', d.env.length ? plural(d.env.length, 'secret') : null, envs),
-      apply);
+    root.replaceChildren(h('div', { class: 'cols sx-cols' },
+      h('div', { class: 'col' },
+        sec('Environment secrets', d.env.length ? `${plural(d.env.length, 'secret')} \u00b7 available to every chat and terminal` : null, envs),
+        sec('SSH keys', d.keys.length ? plural(d.keys.length, 'key') : null, keys)),
+      h('div', { class: 'col' },
+        sec('Git hosts', 'gh and glab', cliCard),
+        sec('About secrets', null, intro),
+        sec('Where they apply', null, apply))));
   },
 
   // ---------------------------------------------------------- actions: secrets

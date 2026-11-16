@@ -4,7 +4,9 @@
 //   docker cp scripts/screenshots.mjs <container>:/tmp/ && \
 //   docker exec -u roost <container> node /tmp/screenshots.mjs /tmp/shots
 //
-// Use a throwaway container seeded with scripts/seed-demo.sh, never a real one.
+// Use a throwaway container seeded with scripts/seed-demo.sh, never a real one. Without Docker,
+// run a second dashboard with ROOST_WORKSPACE, ROOST_STATE_DIR and HOME pointed at seeded scratch
+// folders, and set ROOST_URL to it. For the board's live lanes, start a chat or two there first.
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -14,11 +16,12 @@ const out = process.argv[2] || '/tmp/shots';
 const base = process.env.ROOST_URL || 'http://127.0.0.1:7680/';
 const C1 = '#/chat/claude%3A11111111-1111-4111-8111-111111111111';
 const shots = (process.env.SHOTS ? JSON.parse(process.env.SHOTS) : [
+  { name: 'desktop-board-dark', w: 1440, h: 900, scheme: 'dark', route: '#/board' },
   { name: 'desktop-chat-dark', w: 1440, h: 900, scheme: 'dark', route: C1, open: ['Edit'] },
   { name: 'desktop-chat-light', w: 1440, h: 900, scheme: 'light', route: C1, open: ['Edit'] },
+  { name: 'phone-board-dark', w: 390, h: 844, scheme: 'dark', route: '#/board', mobile: true },
   { name: 'phone-chat-dark', w: 390, h: 844, scheme: 'dark', route: C1, mobile: true, open: ['Edit'] },
-  { name: 'phone-projects-light', w: 390, h: 844, scheme: 'light', route: '#/projects', mobile: true },
-  { name: 'phone-overview-dark', w: 390, h: 844, scheme: 'dark', route: '#/overview', mobile: true },
+  { name: 'phone-palette-light', w: 390, h: 844, scheme: 'light', route: '#/board', mobile: true, click: ['#bnav >> text=Jump'], type: 'rate' },
 ]);
 
 const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
@@ -32,7 +35,6 @@ for (const s of shots) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(base + (s.route || ''), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(s.wait || 2500);
-  if (s.expandAll) await page.evaluate(() => document.getElementById('expand-all')?.click()).then(() => page.waitForTimeout(400));
   for (const text of s.open || []) { // expand tool cards by their visible text, e.g. "Edit"
     await page.locator('#chat-pane .tc-head', { hasText: text }).first().click().catch(() => {});
     await page.waitForTimeout(300);
@@ -41,6 +43,7 @@ for (const s of shots) {
     await page.locator(sel).first().click().catch(() => {});
     await page.waitForTimeout(400);
   }
+  if (s.type) { await page.keyboard.type(s.type); await page.waitForTimeout(400); }
   if (s.scroll === 'top') await page.evaluate(() => { const el = document.querySelector('#chat-pane .stream'); if (el) el.scrollTop = 0; });
   await page.screenshot({ path: `${out}/${s.name}.png` });
   console.log(`${s.name}: ok${errors.length ? ` (page errors: ${errors.join('; ')})` : ''}`);

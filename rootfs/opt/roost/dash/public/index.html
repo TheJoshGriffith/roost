@@ -3,77 +3,83 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#15171a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf8f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121316" media="(prefers-color-scheme: dark)">
 <title>roost</title>
 <link rel="icon" href="icon.svg?v=__V__" type="image/svg+xml">
 <link rel="stylesheet" href="style.css?v=__V__">
 </head>
-<body data-route="projects" data-chat-open="false">
+<body data-route="board" data-viewer="off">
+<div class="app" id="app">
+  <header class="strip">
+    <a class="brand" href="#/board" aria-label="roost: board">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="ln" d="M3 20h18"/><path class="ln" d="M6 20c0-6 3-10 8-10 2.6 0 4.2 1.3 5 3-2-.4-3.6.2-4.6 1.4"/><circle class="eye" cx="16.5" cy="7" r="2.2"/></svg>
+    </a>
+    <div class="brand-name"><span class="nm">roost</span><span class="conn" id="conn" title="Connected"><i></i><span>live</span></span></div>
+    <button class="kbox" id="kbox" type="button" aria-label="Command palette"><span class="kbox-ic"></span><span class="kbox-t">Jump to chat, project or action…</span><kbd id="mod-k">Ctrl K</kbd></button>
+    <div class="sp"></div>
+    <div class="meters" id="meters" title="Plan usage. The tick is where an even pace would put you now."></div>
+    <span class="sep"></span>
+    <div class="health" id="health"></div>
+    <span class="sep"></span>
+    <div class="qlinks" id="qlinks"><button class="ibtn" id="viewer-btn" type="button" aria-label="Viewer: browser and web previews" title="Viewer: browser and web previews" aria-pressed="false"></button></div>
+    <button class="needs-pill zero" id="needs-pill" type="button"><span class="pulse"></span><span id="needs-txt">All clear</span></button>
+    <button class="ibtn" id="theme-btn" type="button" aria-label="Colour theme: system"></button>
+  </header>
 
-<header class="appbar">
-  <a class="brand" href="#/projects" aria-label="roost home">
-    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-      <rect class="bg" width="32" height="32" rx="8"/>
-      <path class="perch" d="M6.5 24h19" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-      <path class="fg" d="M10.5 22.5c0-4.6 2.6-8.2 6.7-8.2 1.5 0 2.6.5 3.6 1.5l3.1-1.5-1.5 3.1c.5 1 .5 2 .5 3.1 0 1-.5 2-1 2z"/>
-    </svg>
-    <span class="name">roost</span>
-    <span class="host" id="host"></span>
-  </a>
-  <nav class="tabs" aria-label="Main">
-    <a class="tab" href="#/projects" data-nav="projects">Projects <span class="nav-badge" data-needs-badge hidden></span></a>
-    <a class="tab" href="#/overview" data-nav="overview">Overview</a>
-    <a class="tab" href="#/secrets" data-nav="secrets">Secrets</a>
-  </nav>
-  <button class="icon-btn" id="viewer-btn" type="button" aria-label="Viewer: browser and web previews" title="Viewer: browser and web previews" aria-pressed="false"></button>
-  <span class="conn" id="conn" title="Status refreshes every 5 seconds"><span class="dot"></span><span>Live</span><span class="conn-time" id="conn-time"></span></span>
-  <button class="icon-btn" id="theme-btn" type="button" aria-label="Colour theme: system"></button>
-</header>
+  <nav class="rail" id="rail" aria-label="Main"></nav>
 
-<div class="shell-row" id="shell-row">
-<main class="views">
-  <section class="view" id="view-projects" aria-label="Projects">
-    <div class="projects-layout">
-      <div class="tree-pane">
-        <div class="view-scroll" id="tree-scroll">
-          <div class="toolbar">
-            <label class="search"><span class="sr-only">Filter projects and chats</span><input class="input" type="search" id="filter" placeholder="Filter projects and chats" autocomplete="off" enterkeyhint="search"></label>
-            <div class="tb-row">
-              <button class="toggle-chip" id="archived-btn" type="button" aria-pressed="false">Archived <span class="count" id="archived-count"></span></button>
-              <span class="spacer"></span>
-              <button class="icon-btn sm tb-desk" id="expand-all" type="button" aria-label="Expand all" title="Expand all"></button>
-              <button class="icon-btn sm tb-desk" id="collapse-all" type="button" aria-label="Collapse all" title="Collapse all"></button>
-              <button class="btn primary small" id="new-project" type="button"></button>
-            </div>
-          </div>
-          <div class="tree" id="tree"></div>
-          <div class="tree-foot" id="tree-foot"></div>
+  <div class="shell-row" id="shell-row">
+    <main class="views" id="views">
+      <section class="screen" id="scr-board" aria-label="Board">
+        <div class="tb">
+          <h1>Board</h1>
+          <div class="chips" id="chips"></div>
+          <label class="filter"><span class="filter-ic"></span><span class="sr-only">Filter chats</span><input type="search" id="filter" placeholder="Filter chats" autocomplete="off" enterkeyhint="search"></label>
+          <button class="toggle" id="archived-btn" type="button" aria-pressed="false"><span class="box"></span><span class="lbl">Archived</span><span class="n" id="archived-count"></span></button>
+          <div class="split"><button class="btn pri" id="new-chat" type="button"><span class="lbl">New chat</span></button><button class="btn pri" id="new-chat-menu" type="button" aria-label="New chat in a project"></button></div>
         </div>
-      </div>
-      <section class="chat-pane" id="chat-pane" aria-label="Chat"></section>
-    </div>
-  </section>
+        <div class="projbar" id="projbar" hidden></div>
+        <div class="bwrap">
+          <div class="lanes" id="lanes"></div>
+          <aside class="feed" aria-label="Activity">
+            <div class="feed-h"><span class="lab">Activity</span><span class="tag live">live</span></div>
+            <div class="feed-l" id="feed"></div>
+          </aside>
+        </div>
+      </section>
 
-  <section class="view" id="view-overview" aria-label="Overview" hidden>
-    <div class="view-scroll"><div class="ov" id="ov"></div></div>
-  </section>
+      <section class="screen" id="scr-chat" aria-label="Chat">
+        <aside class="slist" aria-label="Sessions">
+          <div class="slist-h"><a class="ibtn" href="#/board" id="sl-board" title="Back to the board" aria-label="Back to the board"></a><label class="filter"><span class="filter-ic"></span><span class="sr-only">Filter sessions</span><input type="search" id="sl-filter" placeholder="Sessions" autocomplete="off"></label></div>
+          <div class="slist-l" id="slist"></div>
+        </aside>
+        <section class="sc chat-pane" id="chat-pane" aria-label="Conversation"></section>
+        <aside class="ctx" id="ctx" aria-label="Chat details"></aside>
+      </section>
 
-  <section class="view" id="view-secrets" aria-label="Keys and secrets" hidden>
-    <div class="view-scroll"><div class="ov" id="secrets"></div></div>
-  </section>
-</main>
-<div class="viewer-split" id="viewer-split" role="separator" aria-label="Resize viewer" title="Drag to resize, double-click to reset" hidden></div>
-<aside class="viewer" id="viewer" aria-label="Viewer" hidden></aside>
+      <section class="screen" id="scr-system" aria-label="System">
+        <div class="tb"><h1>System</h1><span class="tb-sub" id="sys-sub"></span><div class="sp"></div><div class="tb-acts" id="sys-acts"></div></div>
+        <div class="pg"><div id="ov"></div></div>
+      </section>
+
+      <section class="screen" id="scr-secrets" aria-label="Keys and secrets">
+        <div class="tb"><h1>Secrets</h1><span class="tb-sub">Values are write-only. Agents get them as environment variables; roost never shows them again.</span></div>
+        <div class="pg"><div id="secrets"></div></div>
+      </section>
+    </main>
+    <div class="viewer-split" id="viewer-split" role="separator" aria-label="Resize viewer" title="Drag to resize, double-click to reset" hidden></div>
+    <aside class="viewer" id="viewer" aria-label="Viewer" hidden></aside>
+  </div>
+
+  <nav class="bnav" id="bnav" aria-label="Main"></nav>
 </div>
 
-<nav class="bottomnav" aria-label="Main">
-  <a href="#/projects" data-nav="projects"></a>
-  <a href="#/chat" data-nav="chat"></a>
-  <a href="#/overview" data-nav="overview"></a>
-  <a href="#/secrets" data-nav="secrets"></a>
-</nav>
-
+<dialog class="pal" id="pal" aria-label="Command palette">
+  <div class="pal-in"><span class="pal-ic"></span><input id="pal-in" placeholder="Jump to a chat, start one, or run an action…" autocomplete="off" spellcheck="false" aria-label="Search"><span class="pal-scope">everything</span></div>
+  <div class="pal-l" id="pal-l" role="listbox"></div>
+  <div class="pal-f"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span class="pal-try">Try “new roost”, “allow”, “vs”, “theme”</span></div>
+</dialog>
 <dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
 <dialog class="sheet menu" id="menu" aria-label="Actions"></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
