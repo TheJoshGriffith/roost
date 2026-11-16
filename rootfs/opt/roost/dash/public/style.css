@@ -980,3 +980,152 @@ a.att:hover { border-color: var(--line-2); color: var(--text); }
 .att-img img { display: block; max-width: min(260px, 60vw); max-height: 200px; object-fit: contain; }
 .att-img:hover { border-color: var(--line-2); }
 .composer.is-drop { border-color: var(--accent); border-style: dashed; background: var(--accent-soft); }
+
+/* ---------------------------------------------------------------- compact density
+   With a mouse (fine pointer) nothing needs 44px finger targets, so tighten
+   type, rows and padding. Touch devices keep the roomier base sizes above. */
+@media (hover: hover) and (pointer: fine) {
+  :root { --tap: 32px; --radius: 9px; --radius-sm: 6px; --appbar-h: 44px; }
+  body { font-size: 13.5px; }
+
+  /* controls */
+  .btn { min-height: 30px; padding: 0 10px; font-size: 13px; border-radius: 7px; gap: 5px; }
+  .btn.small { min-height: 26px; padding: 0 8px; font-size: 12.5px; border-radius: 6px; }
+  .icon-btn { border-radius: 7px; }
+  .icon-btn.sm { width: 26px; height: 26px; border-radius: 6px; }
+  .input { min-height: 32px; padding: 0 10px; font-size: 13.5px; border-radius: 7px; }
+  textarea.input { padding: 7px 10px; font-size: 13px; }
+  .badge { height: 18px; padding: 0 6px; font-size: 11px; }
+  .chip-branch { height: 18px; padding: 0 6px; font-size: 11px; }
+  .tool.sm { --s: 16px; }
+
+  /* app bar */
+  .appbar { gap: 10px; padding-left: 14px; }
+  .logo { width: 24px; height: 24px; }
+  .brand { gap: 7px; }
+  .brand .name { font-size: 15px; }
+  .brand .host { font-size: 12px; }
+  .tab { height: 30px; padding: 0 10px; font-size: 13px; border-radius: 7px; }
+  .tab .nav-badge { min-width: 16px; height: 16px; line-height: 16px; font-size: 10.5px; }
+  .conn { font-size: 12px; }
+
+  /* projects tree */
+  .toolbar { padding: 10px 10px 8px; gap: 8px; }
+  .search .i { left: 10px; }
+  .search .input { padding-left: 32px; }
+  .tb-row { gap: 4px; }
+  .toggle-chip { min-height: 28px; padding: 0 10px; font-size: 12.5px; }
+  .tree { padding: 0 10px 16px; gap: 8px; }
+  .tree-foot { padding: 4px 10px 20px; }
+  .proj-head { min-height: 0; padding: 2px 4px 2px 4px; gap: 2px; }
+  .proj-toggle { min-height: 32px; gap: 6px; padding: 0 4px; }
+  .proj-name { font-size: 14px; }
+  .proj-sub { padding: 0 10px 6px 32px; margin-top: -4px; font-size: 12px; gap: 5px; }
+  .proj-actions { padding: 6px 8px; gap: 4px; }
+  .proj-actions .btn { min-height: 26px; padding: 0 8px; font-size: 12.5px; border-radius: 6px; }
+  .proj-actions .btn .tool { --s: 14px; }
+  .proj-actions { flex-wrap: nowrap; }
+  .proj-actions .btn:not(.ghost) { padding: 0 8px 0 6px; gap: 4px; }
+  .proj-actions .btn > .i { width: 13px; height: 13px; }
+  .proj-actions .btn.ghost { padding: 0; width: 26px; color: var(--muted); }
+  .proj-actions .btn.ghost:hover { color: var(--text); }
+  .proj-actions .btn:not(.ghost) + .btn.ghost { margin-left: auto; }
+  .proj-actions .btn.ghost .pa-lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .locs { padding: 0 6px 6px 10px; }
+  .loc + .loc { margin-top: 2px; }
+  .loc-head { min-height: 24px; font-size: 12px; gap: 6px; }
+  .loc-label { font-size: 12px; }
+  .chats { margin-left: 8px; padding-left: 6px; }
+  .chat-item { border-radius: 7px; }
+  .chat-item.is-selected::before { left: -7px; top: 6px; bottom: 6px; }
+  .chat-open { min-height: 0; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 7px; }
+  .chat-open .tool { margin-top: 1px; }
+  .chat-text { gap: 0; }
+  .chat-title { font-size: 13px; }
+  .chat-meta { font-size: 11.5px; gap: 4px; }
+  .chat-more { width: 26px; height: 26px; }
+
+  /* chat header + stream */
+  .ch { min-height: 0; padding: 6px 8px 6px 14px; gap: 4px; }
+  .ch-main { gap: 8px; }
+  .ch-title { font-size: 14px; }
+  .ch-meta { font-size: 11.5px; margin-top: 1px; }
+  .ch-meta .path { font-size: 11.5px; }
+  .ch .ch-actions .btn { min-height: 28px; }
+  .status { height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; }
+  .stream-inner { max-width: 860px; padding: 16px 20px 20px; }
+  .stream-inner > .ev { margin-top: 10px; }
+  .stream-inner > .ev-user { margin-top: 18px; }
+  .stream-inner > .ev-tool + .ev-tool,
+  .stream-inner > .ev-reasoning + .ev-tool,
+  .stream-inner > .ev-tool + .ev-reasoning { margin-top: 4px; }
+  .stream-inner > .ev-notice { margin: 16px 0 2px; }
+  .md { font-size: 14px; line-height: 1.55; }
+  .md h3 { font-size: 15px; }
+  .md h4 { font-size: 14px; }
+  .bubble { font-size: 14px; padding: 7px 12px; border-radius: 14px 14px 5px 14px; }
+  .think-body, .think-body .md { font-size: 13px; }
+  .ev-reasoning .think-toggle { min-height: 26px; font-size: 12.5px; }
+  .live-ind { font-size: 13px; margin-top: 12px; }
+  .tc { border-radius: 8px; }
+  .tc-head { min-height: 30px; padding: 4px 8px; font-size: 12.5px; gap: 7px; }
+  .tc-arg { font-size: 12px; }
+  .tc-body { padding: 8px; gap: 8px; }
+  .perm { padding: 10px 12px; gap: 10px; border-radius: 10px; }
+  .perm-icon { width: 26px; height: 26px; border-radius: 7px; }
+  .perm-title { font-size: 14px; }
+  .perm-actions .btn { min-height: 30px; }
+  .jump { height: 28px; font-size: 12.5px; padding: 0 12px; }
+  .empty-chat h3 { font-size: 17px; }
+  .suggest { margin-top: 16px; gap: 6px; }
+  .sg-card { padding: 8px 12px; }
+
+  /* composer */
+  .composer-wrap { max-width: 892px; padding: 2px 20px 12px; }
+  .composer { border-radius: 12px; padding: 6px 6px 4px 10px; }
+  .ta { font-size: 14px; min-height: 24px; padding: 2px 6px 4px 0; }
+  .pick select { height: 28px; font-size: 12.5px; }
+  .send { width: 30px; height: 30px; border-radius: 8px; }
+  .composer-bar .icon-btn { width: 28px; height: 28px; }
+
+  /* overview, cards, sheets, menus */
+  .ov { padding: 12px 16px 20px; gap: 14px; }
+  .ov-cols, .ov-col { gap: 14px; }
+  .card-pad { padding: 10px 12px; }
+  .card-h { min-height: 0; padding: 8px 10px 8px 12px; gap: 8px; }
+  .card-h h3 { font-size: 14px; }
+  .card-h .sub { font-size: 12px; }
+  .us-list { padding: 10px 12px; gap: 10px; }
+  .attn-item { padding: 8px 10px 8px 12px; gap: 10px; font-size: 13px; }
+  .attn-done { padding: 10px 12px; font-size: 13px; }
+  .rc-head { min-height: 0; padding: 6px 6px 6px 12px; }
+  .rc-asking { margin: 0 12px 8px; padding: 8px 10px; font-size: 13px; }
+  .console-toggle { min-height: 26px; font-size: 12.5px; }
+  .lnk { min-height: 0; padding: 7px 12px; gap: 10px; }
+  .lnk-ic { width: 28px; height: 28px; border-radius: 7px; }
+  .lnk-t { font-size: 13.5px; }
+  .lnk-d { font-size: 12px; }
+  .cmd-row { margin: 6px 0 4px; padding: 2px 2px 2px 10px; border-radius: 7px; }
+  .cmd-row code { padding: 5px 0; font-size: 12.5px; }
+  .svc { min-height: 0; padding: 6px 6px 6px 12px; }
+  .us-label, .us-pct { font-size: 13px; }
+  .us-bar { height: 6px; }
+  .us-meta { font-size: 11.5px; }
+  .sheet-head { padding: 10px 8px 4px 18px; }
+  .sheet-head h2 { font-size: 15px; }
+  .sheet-body { padding: 4px 18px 14px; gap: 14px; }
+  .sheet-foot { padding: 10px 18px; }
+  .sheet.menu { width: 220px; }
+  .sheet.menu .menu-list { padding: 4px; }
+  .sheet.menu .menu-item { min-height: 30px; font-size: 13px; gap: 10px; padding: 0 8px; border-radius: 6px; }
+  .menu-title { padding: 6px 8px 2px; font-size: 11px; }
+  .switch-row { min-height: 30px; }
+  .sx-row { padding: 10px 12px; }
+
+  /* viewer */
+  .vw-head { min-height: 36px; padding: 3px 4px; }
+  .vw-tab-btn { height: 28px; font-size: 12.5px; }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 1000px) {
+  .tree-pane { flex-basis: clamp(280px, 24vw, 340px); }
+}

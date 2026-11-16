@@ -1463,9 +1463,9 @@ function renderProject(p, view) {
     if (!p.other) sec.append(h('div', { class: 'proj-actions' },
       h('button', { type: 'button', class: 'btn', onclick: () => view.onNewChat(p, 'claude') }, icon('plus', 14), toolBadge('claude'), 'Claude'),
       h('button', { type: 'button', class: 'btn', onclick: () => view.onNewChat(p, 'codex') }, icon('plus', 14), toolBadge('codex'), 'Codex'),
-      firstPath ? h('a', { class: 'btn ghost', href: 'code/?folder=' + encodeURIComponent(firstPath), target: '_blank', onclick: view.onExternal }, icon('code', 15), 'VS Code') : null,
-      firstPath ? h('a', { class: 'btn ghost', href: 'files/files/workspace/' + encodeURI(relPath(firstPath)), target: '_blank', onclick: view.onExternal }, icon('folderOpen', 15), 'Files') : null,
-      h('button', { type: 'button', class: 'btn ghost', onclick: () => view.onEdit(p) }, icon('pencil', 14), 'Edit')));
+      firstPath ? h('a', { class: 'btn ghost', title: 'Open in VS Code', href: 'code/?folder=' + encodeURIComponent(firstPath), target: '_blank', onclick: view.onExternal }, icon('code', 15), h('span', { class: 'pa-lbl' }, 'VS Code')) : null,
+      firstPath ? h('a', { class: 'btn ghost', title: 'Browse files', href: 'files/files/workspace/' + encodeURI(relPath(firstPath)), target: '_blank', onclick: view.onExternal }, icon('folderOpen', 15), h('span', { class: 'pa-lbl' }, 'Files')) : null,
+      h('button', { type: 'button', class: 'btn ghost', title: 'Edit project', onclick: () => view.onEdit(p) }, icon('pencil', 14), h('span', { class: 'pa-lbl' }, 'Edit'))));
   }
   return sec;
 }
