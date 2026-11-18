@@ -25,13 +25,22 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
-async function api(method, url, body, raw) {
-  const res = await fetch(url, {
-    method,
-    headers: method === 'GET' ? {} : { 'X-Roost': '1', ...(raw ? {} : { 'Content-Type': 'application/json' }) },
-    body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
-    cache: 'no-store',
-  });
+// `timeoutMs` gives up on a request that never answers (an overloaded server).
+async function api(method, url, body, raw, timeoutMs) {
+  const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: method === 'GET' ? {} : { 'X-Roost': '1', ...(raw ? {} : { 'Content-Type': 'application/json' }) },
+      body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
+      cache: 'no-store',
+      signal,
+    });
+  } catch (e) {
+    if (e.name === 'TimeoutError') throw new Error(`no answer after ${Math.round(timeoutMs / 1000)}s`);
+    throw e;
+  }
   const type = res.headers.get('content-type') || '';
   const data = type.includes('json') ? await res.json().catch(() => null) : await res.text();
   if (!res.ok) throw new Error((data && data.error) || (typeof data === 'string' && data) || res.statusText);
@@ -173,17 +182,44 @@ function followOnly(keep) {
   }
 }
 
+const isOnScreen = (entry) => App.chats.get(App.view.current) === entry;
+
+// A chat's history, then its live stream. Only a successful load marks the chat
+// loaded: a failed one (say the server is too busy to answer) is retried while
+// the chat is on screen and whenever it's opened again, rather than leaving it
+// empty until the page is reloaded.
 async function loadHistory(entry) {
   if (entry.loaded || isDraftKey(entry.key)) {
     entry.loaded = true;
     // Seen before: pick its stream back up where we left off.
     if (entry.streamKey) connect(entry, entry.streamKey, 0, true);
+    // History arrived after we'd moved on, so the stream was never opened.
+    else if (entry.historyAt) connect(entry, entry.key, entry.historyAt);
     return;
   }
-  entry.loaded = true;
+  if (entry.loading) return;
+  entry.loading = true;
+  clearTimeout(entry.retryTimer);
   const opened = Date.now();
+  let res;
   try {
-    const { events, mode, model } = await api('GET', `api/live/history?key=${encodeURIComponent(entry.key)}`);
+    res = await api('GET', `api/live/history?key=${encodeURIComponent(entry.key)}`, undefined, false, 45000);
+  } catch (e) {
+    entry.loading = false;
+    entry.historyFails = (entry.historyFails || 0) + 1;
+    const wait = Math.min(60, 5 * 2 ** (entry.historyFails - 1));
+    if (isOnScreen(entry)) {
+      toast(`Couldn’t load this chat’s history: ${e.message}. Trying again in ${wait}s.`);
+      entry.retryTimer = setTimeout(() => { if (isOnScreen(entry)) loadHistory(entry); }, wait * 1000);
+    }
+    return;
+  }
+  entry.loading = false;
+  entry.loaded = true;
+  entry.historyFails = 0;
+  entry.historyAt = opened;
+  {
+    const { events, mode, model } = res;
     const t0 = opened - 60000;
     events.forEach((ev, i) => ingest(entry, ev, ev.at || t0 + i));
     // The chat's remembered settings, so its pickers show what it will actually resume with.
@@ -191,11 +227,10 @@ async function loadHistory(entry) {
     if (mode && !entry.state.mode) { entry.state.mode = mode; changed = true; }
     if (model != null && entry.state.model == null && knownModel(entry, model)) { entry.state.model = model; changed = true; }
     if (changed && chatView.state === entry.state) chatView.update({ changed: [], chrome: true });
-  } catch (e) {
-    ingest(entry, { t: 'notice', level: 'error', text: `Couldn't load this chat's history: ${e.message}` });
   }
   if (entry.state.status === 'offline' || entry.state.status === 'idle') applyEvent(entry.state, { type: 'status', status: 'offline' });
-  connect(entry, entry.key, opened);
+  // Only the chat on screen streams (see followOnly); otherwise connect on return.
+  if (isOnScreen(entry)) connect(entry, entry.key, opened);
   scheduleCtx();
 }
 
